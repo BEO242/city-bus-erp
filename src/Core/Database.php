@@ -40,6 +40,7 @@ final class Database
                     $cfg['password'],
                     $cfg['options'] ?? []
                 );
+                self::$instance->exec("SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci");
                 self::$instance->exec("SET time_zone = '+01:00'");
             } catch (PDOException $e) {
                 throw new \RuntimeException(
