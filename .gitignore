@@ -1,4 +1,4 @@
-/vendor/
+# vendor/ included for Hostinger deploy (no SSH/composer)
 /node_modules/
 .env
 *.log
