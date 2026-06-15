@@ -1,0 +1,52 @@
+name: Deploy to Hostinger
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup PHP 8.2
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: mbstring, pdo, pdo_mysql, intl
+
+      - name: Install Composer dependencies (no dev)
+        run: composer install --no-dev --optimize-autoloader --no-interaction --prefer-dist
+
+      - name: Deploy via FTP to Hostinger
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+        with:
+          server: ${{ secrets.FTP_HOST }}
+          username: ${{ secrets.FTP_USERNAME }}
+          password: ${{ secrets.FTP_PASSWORD }}
+          protocol: ftps
+          port: 21
+          local-dir: ./
+          server-dir: /domains/holdingtptinvestissement.com/public_html/citybus/
+          exclude: |
+            **/.git*
+            **/.git*/**
+            .env
+            .env.local
+            node_modules/**
+            storage/logs/**
+            storage/cache/**
+            storage/sessions/**
+            storage/urban-tickets/**
+            storage/tickets/**
+            storage/pdf/**
+            storage/temp/**
+            docs/**
+            proposals/**
+            rapport_test_citybus.md
+            start-server.bat
+            deploy.sh
