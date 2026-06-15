@@ -1,0 +1,539 @@
+/* ============================================================
+   City Bus ERP — Theme COCKPIT (light + dark mode)
+   ============================================================
+   Mode activé par <html data-theme="dark"> ou data-theme="light"
+   Variables CSS pour faciliter la cohérence et permettre aux vues
+   existantes de s'adapter automatiquement aux deux thèmes.
+============================================================ */
+
+:root {
+  /* Palette City Bus (constante) */
+  --cb-primary:   #C62828;
+  --cb-secondary: #8E0000;
+  --cb-accent:    #F9A825;
+  --cb-dark:      #6A0000;
+  --cb-bg:        #FFEBEE;
+
+  /* Variables thème — light par défaut */
+  --bg-app:        #f1f5f9;
+  --bg-canvas:     #f8fafc;
+  --bg-panel:      #ffffff;
+  --bg-panel-2:    #f8fafc;
+  --bg-elevated:   #ffffff;
+  --bg-statusbar:  #ffffff;
+  --bg-topbar:     #ffffff;
+  --bg-row-hover:  #fafafa;
+  --bg-input:      #ffffff;
+
+  --border-default: #e2e8f0;
+  --border-soft:    #f1f5f9;
+  --border-strong:  #cbd5e1;
+
+  --text-primary:   #0f172a;
+  --text-secondary: #475569;
+  --text-muted:     #64748b;
+  --text-faint:     #94a3b8;
+  --text-on-accent: #ffffff;
+
+  --shadow-card: 0 1px 3px rgba(15, 23, 42, 0.04), 0 1px 2px rgba(15, 23, 42, 0.03);
+  --shadow-pop:  0 12px 32px -8px rgba(15, 23, 42, 0.18);
+
+  /* Status colors (constantes light/dark) */
+  --st-green:   #10b981;
+  --st-amber:   #f59e0b;
+  --st-red:     #ef4444;
+  --st-info:    #3b82f6;
+
+  --st-green-bg: #ecfdf5;
+  --st-amber-bg: #fef3c7;
+  --st-red-bg:   #fee2e2;
+  --st-slate-bg: #f1f5f9;
+  --st-slate-fg: #475569;
+}
+
+html[data-theme="dark"] {
+  --bg-app:        #0a0a0b;
+  --bg-canvas:     #0d0e12;
+  --bg-panel:      #13141a;
+  --bg-panel-2:    #1c1d24;
+  --bg-elevated:   #1c1d24;
+  --bg-statusbar:  #13141a;
+  --bg-topbar:     #13141a;
+  --bg-row-hover:  #1c1d24;
+  --bg-input:      #1c1d24;
+
+  --border-default: #252731;
+  --border-soft:    #1c1d24;
+  --border-strong:  #3a3d4a;
+
+  --text-primary:   #e5e7eb;
+  --text-secondary: #cbd5e1;
+  --text-muted:     #9ca3af;
+  --text-faint:     #6e7180;
+  --text-on-accent: #ffffff;
+
+  --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.3), 0 1px 2px rgba(0, 0, 0, 0.2);
+  --shadow-pop:  0 16px 40px -8px rgba(0, 0, 0, 0.6);
+
+  --st-green-bg: rgba(16, 185, 129, 0.12);
+  --st-amber-bg: rgba(245, 158, 11, 0.15);
+  --st-red-bg:   rgba(239, 68, 68, 0.12);
+  --st-slate-bg: #1c1d24;
+  --st-slate-fg: #9ca3af;
+}
+
+/* ============================================================
+   BASE — application des variables au document
+============================================================ */
+html, body {
+  background: var(--bg-app);
+  color: var(--text-primary);
+}
+
+/* ============================================================
+   OVERRIDES — Tailwind classes existantes vers nos variables
+   Permet aux ~50 vues existantes de s'adapter sans modification
+============================================================ */
+
+/* Backgrounds blancs / clairs */
+html[data-theme="dark"] .bg-white,
+html[data-theme="dark"] [class*="bg-slate-50"]:not([class*="bg-slate-500"]):not([class*="bg-slate-700"]):not([class*="bg-slate-900"]),
+html[data-theme="dark"] .bg-gray-50,
+html[data-theme="dark"] .bg-slate-100 {
+  background-color: var(--bg-panel) !important;
+}
+
+html[data-theme="dark"] .bg-slate-50\/50,
+html[data-theme="dark"] .bg-slate-50\/30 {
+  background-color: var(--bg-panel-2) !important;
+}
+
+html[data-theme="dark"] .bg-cb-bg,
+html[data-theme="dark"] [class*="bg-cb-bg"] {
+  background-color: rgba(198, 40, 40, 0.10) !important;
+}
+
+/* Texte */
+html[data-theme="dark"] .text-slate-900,
+html[data-theme="dark"] .text-gray-900,
+html[data-theme="dark"] .text-black {
+  color: var(--text-primary) !important;
+}
+html[data-theme="dark"] .text-slate-700,
+html[data-theme="dark"] .text-slate-800 {
+  color: var(--text-secondary) !important;
+}
+html[data-theme="dark"] .text-slate-500,
+html[data-theme="dark"] .text-slate-600 {
+  color: var(--text-muted) !important;
+}
+html[data-theme="dark"] .text-slate-400,
+html[data-theme="dark"] .text-slate-300 {
+  color: var(--text-faint) !important;
+}
+
+/* Bordures */
+html[data-theme="dark"] .border-slate-100,
+html[data-theme="dark"] .border-slate-200,
+html[data-theme="dark"] .border-gray-200 {
+  border-color: var(--border-default) !important;
+}
+html[data-theme="dark"] .border-slate-50 {
+  border-color: var(--border-soft) !important;
+}
+
+/* Inputs / selects */
+html[data-theme="dark"] input[type="text"],
+html[data-theme="dark"] input[type="email"],
+html[data-theme="dark"] input[type="password"],
+html[data-theme="dark"] input[type="number"],
+html[data-theme="dark"] input[type="search"],
+html[data-theme="dark"] input[type="tel"],
+html[data-theme="dark"] input[type="date"],
+html[data-theme="dark"] input[type="datetime-local"],
+html[data-theme="dark"] input[type="time"],
+html[data-theme="dark"] textarea,
+html[data-theme="dark"] select {
+  background-color: var(--bg-input) !important;
+  border-color: var(--border-default) !important;
+  color: var(--text-primary) !important;
+}
+html[data-theme="dark"] input::placeholder,
+html[data-theme="dark"] textarea::placeholder {
+  color: var(--text-faint);
+}
+
+/* Tableaux */
+html[data-theme="dark"] table th {
+  background-color: var(--bg-panel-2) !important;
+  color: var(--text-muted) !important;
+  border-color: var(--border-default) !important;
+}
+html[data-theme="dark"] table td {
+  border-color: var(--border-soft) !important;
+}
+html[data-theme="dark"] table tr:hover td,
+html[data-theme="dark"] table tbody tr:hover {
+  background-color: var(--bg-row-hover) !important;
+}
+
+/* Hover fond clair → fond sombre */
+html[data-theme="dark"] .hover\:bg-slate-50:hover,
+html[data-theme="dark"] .hover\:bg-cb-bg\/40:hover,
+html[data-theme="dark"] .hover\:bg-cb-bg\/30:hover {
+  background-color: var(--bg-row-hover) !important;
+}
+
+/* Scrollbar custom */
+html[data-theme="dark"] ::-webkit-scrollbar-track { background: var(--bg-app); }
+html[data-theme="dark"] ::-webkit-scrollbar-thumb { background: var(--border-strong); }
+html[data-theme="dark"] ::-webkit-scrollbar-thumb:hover { background: var(--cb-primary); }
+
+/* ============================================================
+   COCKPIT — éléments visuels distinctifs
+============================================================ */
+
+/* Stripe rouge à gauche des cartes KPI */
+.cockpit-kpi {
+  background: var(--bg-panel);
+  border: 1px solid var(--border-default);
+  border-left: 3px solid var(--cb-primary);
+  border-radius: 6px;
+  padding: 14px 16px;
+  position: relative;
+  transition: all 0.15s ease;
+}
+.cockpit-kpi:hover {
+  border-color: var(--cb-primary);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-card);
+}
+.cockpit-kpi.amber  { border-left-color: var(--cb-accent); }
+.cockpit-kpi.green  { border-left-color: var(--st-green); }
+.cockpit-kpi.danger { border-left-color: var(--st-red); }
+
+.cockpit-kpi-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--text-muted);
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+.cockpit-kpi-value {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--text-primary);
+  font-family: ui-monospace, "SF Mono", Consolas, Menlo, monospace;
+  font-variant-numeric: tabular-nums;
+}
+.cockpit-kpi-value .unit {
+  color: var(--text-faint);
+  font-size: 12px;
+  margin-left: 4px;
+  font-weight: 500;
+}
+
+/* Panel cockpit (entête + corps avec séparateur épuré) */
+.cockpit-panel {
+  background: var(--bg-panel);
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.cockpit-panel-head {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border-default);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--bg-panel);
+}
+.cockpit-panel-head h3 {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.cockpit-panel-head h3 .ic {
+  color: var(--cb-accent);
+  width: 14px;
+  height: 14px;
+}
+
+/* Tables denses cockpit */
+.cockpit-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.cockpit-table thead th {
+  background: var(--bg-panel-2);
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border-default);
+  text-align: left;
+  white-space: nowrap;
+}
+.cockpit-table tbody td {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border-soft);
+  color: var(--text-secondary);
+}
+.cockpit-table tbody tr:hover td {
+  background: var(--bg-row-hover);
+}
+.cockpit-table .mono,
+.cockpit-table .num {
+  font-family: ui-monospace, "SF Mono", Consolas, Menlo, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Status pills avec marker █ */
+.cockpit-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 3px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-family: ui-monospace, monospace;
+}
+.cockpit-status::before { content: "█"; }
+.cockpit-status.green   { background: var(--st-green-bg); color: var(--st-green); }
+.cockpit-status.amber   { background: var(--st-amber-bg); color: var(--st-amber); }
+.cockpit-status.red     { background: var(--st-red-bg);   color: var(--st-red); }
+.cockpit-status.slate   { background: var(--st-slate-bg); color: var(--st-slate-fg); }
+
+/* Couleurs sémantiques */
+.text-green { color: var(--st-green) !important; }
+.text-amber { color: var(--st-amber) !important; }
+.text-red   { color: var(--st-red)   !important; }
+.text-faint { color: var(--text-faint) !important; }
+
+/* ============================================================
+   TOPBAR cockpit
+============================================================ */
+.cockpit-topbar {
+  height: 48px;
+  background: var(--bg-topbar);
+  border-bottom: 1px solid var(--border-default);
+  display: flex;
+  align-items: center;
+  padding: 0 14px;
+  gap: 12px;
+  font-size: 12px;
+  position: sticky;
+  top: 0;
+  z-index: 30;
+}
+.cockpit-topbar .live {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+.cockpit-topbar .sep { color: var(--border-strong); }
+.cockpit-topbar .muted { color: var(--text-muted); }
+.cockpit-topbar .accent { color: var(--cb-accent); font-weight: 600; }
+
+.cockpit-pulse {
+  width: 8px; height: 8px;
+  background: var(--st-green);
+  border-radius: 50%;
+  animation: cockpit-pulse 1.5s infinite;
+}
+@keyframes cockpit-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%      { opacity: 0.4; transform: scale(0.85); }
+}
+
+/* Ticker animé */
+.cockpit-ticker-wrap {
+  flex: 1;
+  height: 30px;
+  background: var(--bg-panel-2);
+  border: 1px solid var(--border-default);
+  border-radius: 3px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  min-width: 0;
+}
+.cockpit-ticker {
+  display: flex;
+  gap: 36px;
+  white-space: nowrap;
+  animation: cockpit-tick 60s linear infinite;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+@keyframes cockpit-tick {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-50%); }
+}
+
+/* Bouton commande / search */
+.cockpit-btn {
+  padding: 4px 10px;
+  background: var(--bg-panel-2);
+  border: 1px solid var(--border-default);
+  border-radius: 3px;
+  color: var(--text-primary);
+  font-size: 11px;
+  cursor: pointer;
+  font-family: inherit;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 500;
+  height: 28px;
+}
+.cockpit-btn:hover {
+  background: var(--bg-elevated);
+  border-color: var(--border-strong);
+}
+.cockpit-btn .kbd {
+  color: var(--text-faint);
+  font-family: ui-monospace, monospace;
+  font-size: 10px;
+}
+.cockpit-icon-btn {
+  width: 28px;
+  height: 28px;
+  background: transparent;
+  border: none;
+  border-radius: 3px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.cockpit-icon-btn:hover {
+  background: var(--bg-panel-2);
+  color: var(--text-primary);
+}
+
+/* ============================================================
+   STATUSBAR (footer)
+============================================================ */
+.cockpit-statusbar {
+  height: 24px;
+  background: var(--bg-statusbar);
+  border-top: 1px solid var(--border-default);
+  display: flex;
+  align-items: center;
+  padding: 0 14px;
+  font-size: 10px;
+  color: var(--text-muted);
+  gap: 16px;
+  font-family: ui-monospace, monospace;
+}
+.cockpit-statusbar .ok    { color: var(--st-green); }
+.cockpit-statusbar .warn  { color: var(--st-amber); }
+.cockpit-statusbar .err   { color: var(--st-red); }
+
+/* ============================================================
+   THEME TOGGLE
+============================================================ */
+.theme-toggle {
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+  background: var(--bg-panel);
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s;
+}
+.theme-toggle:hover {
+  border-color: var(--cb-primary);
+  color: var(--cb-primary);
+}
+.theme-toggle .sun  { display: none; }
+.theme-toggle .moon { display: block; }
+html[data-theme="dark"] .theme-toggle .sun  { display: block; }
+html[data-theme="dark"] .theme-toggle .moon { display: none; }
+
+/* ============================================================
+   ADAPTATIONS DARK MODE pour composants existants
+============================================================ */
+
+/* Pills colorés conservent leurs accents en dark */
+html[data-theme="dark"] .bg-emerald-50 { background-color: var(--st-green-bg) !important; }
+html[data-theme="dark"] .bg-amber-50   { background-color: var(--st-amber-bg) !important; }
+html[data-theme="dark"] .bg-rose-50    { background-color: var(--st-red-bg) !important; }
+html[data-theme="dark"] .bg-rose-100   { background-color: rgba(239, 68, 68, 0.18) !important; }
+html[data-theme="dark"] .bg-amber-100  { background-color: rgba(245, 158, 11, 0.20) !important; }
+html[data-theme="dark"] .bg-emerald-100{ background-color: rgba(16, 185, 129, 0.18) !important; }
+
+html[data-theme="dark"] .text-emerald-700,
+html[data-theme="dark"] .text-emerald-600 { color: #34d399 !important; }
+html[data-theme="dark"] .text-amber-700,
+html[data-theme="dark"] .text-amber-600,
+html[data-theme="dark"] .text-amber-900   { color: #fbbf24 !important; }
+html[data-theme="dark"] .text-rose-700,
+html[data-theme="dark"] .text-rose-600,
+html[data-theme="dark"] .text-rose-900    { color: #fb7185 !important; }
+
+/* Gradient cards (KPI premium) */
+html[data-theme="dark"] .bg-gradient-to-br.from-cb-primary,
+html[data-theme="dark"] .bg-gradient-to-r.from-cb-primary {
+  background-image: linear-gradient(135deg, var(--cb-primary), var(--cb-dark)) !important;
+}
+
+/* Boutons */
+html[data-theme="dark"] .border-slate-200 { border-color: var(--border-default) !important; }
+
+/* Halftone — accents préservés */
+.halftone {
+  background-image: radial-gradient(rgba(255,255,255,0.15) 1px, transparent 1px);
+  background-size: 16px 16px;
+}
+html[data-theme="dark"] .halftone {
+  background-image: radial-gradient(rgba(255,255,255,0.08) 1px, transparent 1px);
+}
+
+/* La sidebar reste en couleurs City Bus quel que soit le thème — c'est notre signature */
+.sidebar-cb {
+  background: var(--cb-secondary);
+  color: #fff;
+}
+html[data-theme="dark"] .sidebar-cb {
+  /* En dark, on assombrit légèrement la sidebar pour cohérence */
+  background: linear-gradient(180deg, #5a0000 0%, #3d0000 100%);
+}
+
+.sidebar-cb-header {
+  background: var(--cb-primary);
+}
+html[data-theme="dark"] .sidebar-cb-header {
+  background: linear-gradient(135deg, var(--cb-primary), var(--cb-dark));
+}
+
+/* Smooth theme transitions */
+*, *::before, *::after {
+  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+}
+/* Désactive les transitions pendant le toggle pour éviter le flash */
+html.theme-transitioning * {
+  transition: none !important;
+}

@@ -1,0 +1,15 @@
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+
+    # Serve existing static files directly from public/
+    RewriteCond %{DOCUMENT_ROOT}/public%{REQUEST_URI} -f
+    RewriteRule ^(.+)$ public/$1 [L,QSA]
+
+    # All dynamic requests go to public/index.php
+    RewriteRule ^ public/index.php [L,QSA]
+</IfModule>
+
+# Block direct access to sensitive files
+<FilesMatch "\.(env|sql|sh|md|json|lock|log)$">
+    Require all denied
+</FilesMatch>

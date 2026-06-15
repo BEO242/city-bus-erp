@@ -1,0 +1,451 @@
+<?php
+/** @var \CityBus\Core\View $view */
+$view->extends('layouts/app');
+use CityBus\Models\Trip;
+
+$statusMeta = [
+  'planifie'     => ['label'=>'Planifié',    'cls'=>'bg-slate-100 text-slate-600 border-slate-200',         'icon'=>'clock',        'dot'=>'bg-slate-400'],
+  'valide'       => ['label'=>'Validé',      'cls'=>'bg-cyan-50 text-cyan-700 border-cyan-200',             'icon'=>'check',        'dot'=>'bg-cyan-500'],
+  'embarquement' => ['label'=>'Embarquement','cls'=>'bg-amber-50 text-amber-700 border-amber-200',          'icon'=>'users',        'dot'=>'bg-amber-400'],
+  'en_route'     => ['label'=>'En route',    'cls'=>'bg-cb-primary text-white border-cb-primary',           'icon'=>'navigation',   'dot'=>'bg-white'],
+  'arrive'       => ['label'=>'Arrivé',      'cls'=>'bg-emerald-50 text-emerald-700 border-emerald-200',    'icon'=>'map-pin',      'dot'=>'bg-emerald-500'],
+  'cloture'      => ['label'=>'Clôturé',     'cls'=>'bg-emerald-100 text-emerald-800 border-emerald-300',   'icon'=>'check-circle', 'dot'=>'bg-emerald-600'],
+  'incident'     => ['label'=>'Incident',    'cls'=>'bg-rose-50 text-rose-700 border-rose-200',             'icon'=>'alert-triangle','dot'=>'bg-rose-500'],
+  'retourne'     => ['label'=>'Retourné',    'cls'=>'bg-orange-50 text-orange-700 border-orange-200',       'icon'=>'undo-2',       'dot'=>'bg-orange-500'],
+  'litige'       => ['label'=>'Litige',      'cls'=>'bg-purple-50 text-purple-700 border-purple-200',       'icon'=>'gavel',        'dot'=>'bg-purple-500'],
+  'annule'       => ['label'=>'Annulé',      'cls'=>'bg-rose-50 text-rose-600 border-rose-200',             'icon'=>'x-circle',     'dot'=>'bg-rose-400'],
+];
+$priorityMeta = [
+  'normale' => ['label'=>'','cls'=>''],
+  'vip'     => ['label'=>'VIP','cls'=>'bg-purple-100 text-purple-700'],
+  'express' => ['label'=>'Express','cls'=>'bg-cb-bg text-cb-primary'],
+  'convoi'  => ['label'=>'Convoi','cls'=>'bg-slate-200 text-slate-700'],
+];
+
+$tolerance = (int)\CityBus\Core\Setting::getInt('voyage.delay_tolerance_minutes', 15);
+$otpPct = ((int)($kpiRow['done_count'] ?? 0)) > 0
+  ? round(((int)($kpiRow['otp_count'] ?? 0)) / max(1,(int)($kpiRow['done_count'] ?? 0)) * 100, 1)
+  : null;
+$avgDelay = $kpiRow['avg_delay'] !== null ? round((float)$kpiRow['avg_delay'], 1) : null;
+
+$qs = function (array $merge = []) {
+  return http_build_query(array_filter(array_merge($_GET, $merge), fn($v) => $v !== '' && $v !== null));
+};
+
+$activeScope = $scope ?? '';
+$scopeChips = [
+  ''            => 'Tous',
+  'today'       => "Aujourd'hui",
+  'tomorrow'    => 'Demain',
+  'week'        => 'Cette semaine',
+  'in_progress' => 'En cours',
+  'to_close'    => 'À clôturer',
+];
+?>
+<?php $view->start('content') ?>
+<div class="space-y-5">
+
+  <!-- ── En-tête ─────────────────────────────────────── -->
+  <div class="flex items-center justify-between flex-wrap gap-3">
+    <div>
+      <h1 class="text-2xl font-bold text-slate-900 flex items-center gap-2">
+        <i data-lucide="bus" class="w-6 h-6 text-cb-primary"></i> Voyages
+      </h1>
+      <p class="text-slate-500 text-sm mt-0.5">Planification, suivi opérationnel et exploitation</p>
+    </div>
+    <div class="flex gap-2 flex-wrap">
+      <?php if (can('voyages.export')): ?>
+        <a href="<?= e(url('voyages/export.csv?' . $qs())) ?>"
+           class="px-3 py-2.5 rounded-xl border border-slate-200 text-slate-700 hover:bg-slate-50 inline-flex items-center gap-2 text-sm">
+          <i data-lucide="download" class="w-4 h-4"></i> Export CSV
+        </a>
+      <?php endif ?>
+      <?php if (can('voyages.schedule.view')): ?>
+        <a href="<?= e(url('voyages/schedules')) ?>"
+           class="px-3 py-2.5 rounded-xl border border-slate-200 text-slate-700 hover:bg-slate-50 inline-flex items-center gap-2 text-sm">
+          <i data-lucide="calendar-clock" class="w-4 h-4"></i> Patterns horaires
+        </a>
+      <?php endif ?>
+      <?php if (can('voyages.create')): ?>
+      <a href="<?= e(url('voyages/create')) ?>"
+         class="px-4 py-2.5 rounded-xl bg-cb-primary text-white font-semibold inline-flex items-center gap-2 hover:bg-cb-dark transition shadow-soft">
+        <i data-lucide="plus" class="w-4 h-4"></i> Nouveau voyage
+      </a>
+      <?php endif ?>
+    </div>
+  </div>
+
+  <!-- ── Chips de scope rapide ───────────────────────── -->
+  <div class="flex gap-1.5 flex-wrap">
+    <?php foreach ($scopeChips as $sk => $sl): ?>
+      <a href="?<?= e($qs(['scope' => $sk, 'page' => 1])) ?>"
+         class="px-3 py-1.5 rounded-full text-xs font-semibold border <?= $activeScope === $sk
+            ? 'bg-cb-primary text-white border-cb-primary'
+            : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50' ?>">
+        <?= e($sl) ?>
+      </a>
+    <?php endforeach ?>
+  </div>
+
+  <!-- ── KPIs ─────────────────────────────────────────── -->
+  <div class="grid grid-cols-2 md:grid-cols-6 gap-3">
+    <div class="cockpit-kpi">
+      <div class="cockpit-kpi-label">Voyages période</div>
+      <div class="cockpit-kpi-value"><?= (int)($kpiRow['total_count'] ?? 0) ?></div>
+    </div>
+    <div class="cockpit-kpi green">
+      <div class="cockpit-kpi-label">En cours</div>
+      <div class="cockpit-kpi-value"><?= (int)($kpiRow['in_progress'] ?? 0) ?></div>
+    </div>
+    <div class="cockpit-kpi">
+      <div class="cockpit-kpi-label">Clôturés</div>
+      <div class="cockpit-kpi-value"><?= (int)($kpiRow['closed_count'] ?? 0) ?></div>
+    </div>
+    <div class="cockpit-kpi danger">
+      <div class="cockpit-kpi-label">Incidents</div>
+      <div class="cockpit-kpi-value"><?= (int)($kpiRow['incident_count'] ?? 0) ?></div>
+    </div>
+    <div class="cockpit-kpi amber">
+      <div class="cockpit-kpi-label">OTP départ <span class="text-faint">(±<?= $tolerance ?>min)</span></div>
+      <div class="cockpit-kpi-value">
+        <?= $otpPct !== null ? $otpPct : '—' ?><?= $otpPct !== null ? '<span class="unit">%</span>' : '' ?>
+      </div>
+    </div>
+    <div class="cockpit-kpi amber">
+      <div class="cockpit-kpi-label">Retard moyen</div>
+      <div class="cockpit-kpi-value"><?= $avgDelay !== null ? $avgDelay : '—' ?><?= $avgDelay !== null ? '<span class="unit">min</span>' : '' ?></div>
+    </div>
+  </div>
+
+  <!-- ── Filtres ─────────────────────────────────────── -->
+  <details class="bg-white rounded-2xl border border-slate-100 shadow-soft" <?= ($search || $busId || $driverId || $tripType || $priority || $hasIncident !== null || $minOccup !== null) ? 'open' : '' ?>>
+    <summary class="px-4 py-3 cursor-pointer flex items-center justify-between text-sm font-semibold text-slate-700">
+      <span class="flex items-center gap-2"><i data-lucide="sliders-horizontal" class="w-4 h-4"></i> Filtres avancés</span>
+      <span class="text-xs text-slate-400"><?= (int)$total ?> voyage(s) trouvé(s)</span>
+    </summary>
+    <form method="get" class="p-4 border-t border-slate-100">
+      <input type="hidden" name="scope" value="<?= e($activeScope) ?>">
+      <input type="hidden" name="view" value="<?= e($view) ?>">
+      <input type="hidden" name="sort" value="<?= e($sort) ?>">
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div>
+          <label class="cb-label">Du</label>
+          <input type="date" name="date_from" value="<?= e($dateFrom) ?>" class="cb-input w-full">
+        </div>
+        <div>
+          <label class="cb-label">Au</label>
+          <input type="date" name="date_to" value="<?= e($dateTo) ?>" class="cb-input w-full">
+        </div>
+        <div>
+          <label class="cb-label">Recherche</label>
+          <input type="text" name="search" value="<?= e($search) ?>" placeholder="Code, bus, chauffeur, réf…" class="cb-input w-full">
+        </div>
+        <div>
+          <label class="cb-label">Statut</label>
+          <select name="status" class="cb-input w-full">
+            <option value="">Tous</option>
+            <?php foreach (Trip::STATUSES as $k => $lbl): ?>
+              <option value="<?= e($k) ?>" <?= $status===$k?'selected':'' ?>><?= e($lbl) ?></option>
+            <?php endforeach ?>
+          </select>
+        </div>
+        <div>
+          <label class="cb-label">Ligne</label>
+          <select name="line_id" class="cb-input w-full">
+            <option value="">Toutes</option>
+            <?php foreach ($lines as $l): ?>
+              <option value="<?= (int)$l['id'] ?>" <?= (int)$lineId===(int)$l['id']?'selected':'' ?>>
+                <?= e($l['code']) ?> — <?= e($l['name']) ?>
+              </option>
+            <?php endforeach ?>
+          </select>
+        </div>
+        <div>
+          <label class="cb-label">Bus</label>
+          <select name="bus_id" class="cb-input w-full">
+            <option value="">Tous</option>
+            <?php foreach ($buses as $b): ?>
+              <option value="<?= (int)$b['id'] ?>" <?= (int)$busId===(int)$b['id']?'selected':'' ?>>
+                <?= e($b['code']) ?> · <?= e($b['plate']) ?>
+              </option>
+            <?php endforeach ?>
+          </select>
+        </div>
+        <div>
+          <label class="cb-label">Type</label>
+          <select name="trip_type" class="cb-input w-full">
+            <option value="">Tous</option>
+            <?php foreach (Trip::TYPES as $k => $lbl): ?>
+              <option value="<?= e($k) ?>" <?= $tripType===$k?'selected':'' ?>><?= e($lbl) ?></option>
+            <?php endforeach ?>
+          </select>
+        </div>
+        <div>
+          <label class="cb-label">Priorité</label>
+          <select name="priority" class="cb-input w-full">
+            <option value="">Toutes</option>
+            <?php foreach (Trip::PRIORITIES as $k => $lbl): ?>
+              <option value="<?= e($k) ?>" <?= $priority===$k?'selected':'' ?>><?= e($lbl) ?></option>
+            <?php endforeach ?>
+          </select>
+        </div>
+        <div>
+          <label class="cb-label">Incident ?</label>
+          <select name="has_incident" class="cb-input w-full">
+            <option value="">—</option>
+            <option value="1" <?= $hasIncident==='1'?'selected':'' ?>>Avec incident</option>
+            <option value="0" <?= $hasIncident==='0'?'selected':'' ?>>Sans incident</option>
+          </select>
+        </div>
+        <div>
+          <label class="cb-label">Retard min. (min)</label>
+          <input type="number" name="delay_minutes_min" value="<?= e($delayMin ?? '') ?>" class="cb-input w-full">
+        </div>
+        <div>
+          <label class="cb-label">Occupation min %</label>
+          <input type="number" min="0" max="100" name="min_occupancy" value="<?= e($minOccup ?? '') ?>" class="cb-input w-full">
+        </div>
+        <div>
+          <label class="cb-label">Occupation max %</label>
+          <input type="number" min="0" max="100" name="max_occupancy" value="<?= e($maxOccup ?? '') ?>" class="cb-input w-full">
+        </div>
+      </div>
+
+      <div class="flex justify-between items-center mt-4 pt-3 border-t border-slate-100">
+        <a href="<?= e(url('voyages')) ?>" class="text-sm text-slate-500 hover:text-cb-primary">Réinitialiser</a>
+        <div class="flex gap-2">
+          <button type="submit" class="px-5 py-2.5 rounded-xl bg-slate-900 text-white text-sm font-medium inline-flex items-center gap-2">
+            <i data-lucide="search" class="w-4 h-4"></i> Filtrer
+          </button>
+        </div>
+      </div>
+    </form>
+  </details>
+
+  <!-- ── Vue switcher + tri + pagination ─────────────── -->
+  <div class="flex items-center justify-between flex-wrap gap-3">
+    <div class="flex items-center gap-1 bg-white border border-slate-100 rounded-xl p-1">
+      <a href="?<?= e($qs(['view' => 'cards'])) ?>"
+         class="px-3 py-1.5 rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 <?= $view==='cards' ? 'bg-cb-primary text-white' : 'text-slate-600 hover:bg-slate-50' ?>">
+        <i data-lucide="layout-grid" class="w-3.5 h-3.5"></i> Cartes
+      </a>
+      <a href="?<?= e($qs(['view' => 'table'])) ?>"
+         class="px-3 py-1.5 rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 <?= $view==='table' ? 'bg-cb-primary text-white' : 'text-slate-600 hover:bg-slate-50' ?>">
+        <i data-lucide="list" class="w-3.5 h-3.5"></i> Tableau
+      </a>
+    </div>
+
+    <form method="get" class="flex items-center gap-2">
+      <?php foreach ($_GET as $k => $v): if (in_array($k, ['sort','page'], true)) continue; ?>
+        <input type="hidden" name="<?= e((string)$k) ?>" value="<?= e((string)$v) ?>">
+      <?php endforeach ?>
+      <label class="text-xs text-slate-500">Trier :</label>
+      <select name="sort" onchange="this.form.submit()" class="cb-input text-xs py-1.5">
+        <option value="date_desc"    <?= $sort==='date_desc'?'selected':'' ?>>Date ↓</option>
+        <option value="date_asc"     <?= $sort==='date_asc'?'selected':'' ?>>Date ↑</option>
+        <option value="revenue_desc" <?= $sort==='revenue_desc'?'selected':'' ?>>Recettes ↓</option>
+        <option value="sold_desc"    <?= $sort==='sold_desc'?'selected':'' ?>>Tickets ↓</option>
+        <option value="delay_desc"   <?= $sort==='delay_desc'?'selected':'' ?>>Retard ↓</option>
+        <option value="code_asc"     <?= $sort==='code_asc'?'selected':'' ?>>Code A-Z</option>
+      </select>
+      <label class="text-xs text-slate-500 ml-3">Par page :</label>
+      <select name="per_page" onchange="this.form.submit()" class="cb-input text-xs py-1.5">
+        <?php foreach ([10,25,50,100] as $pp): ?>
+          <option value="<?= $pp ?>" <?= $perPage===$pp?'selected':'' ?>><?= $pp ?></option>
+        <?php endforeach ?>
+      </select>
+    </form>
+  </div>
+
+  <!-- ── Liste ───────────────────────────────────────── -->
+  <?php if (!$trips): ?>
+    <div class="bg-white rounded-2xl border border-slate-100 shadow-soft p-16 text-center">
+      <i data-lucide="bus" class="w-12 h-12 mx-auto text-slate-200 mb-3"></i>
+      <p class="font-semibold text-slate-400">Aucun voyage trouvé</p>
+      <?php if (can('voyages.create')): ?>
+        <a href="<?= e(url('voyages/create')) ?>"
+           class="mt-4 inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-cb-bg text-cb-primary text-sm font-semibold hover:bg-cb-primary hover:text-white transition">
+          <i data-lucide="plus" class="w-4 h-4"></i> Planifier un voyage
+        </a>
+      <?php endif ?>
+    </div>
+  <?php elseif ($view === 'table'): ?>
+
+    <!-- ── Vue tableau dense ───────────────────── -->
+    <div class="bg-white rounded-2xl border border-slate-100 overflow-hidden shadow-soft">
+      <div class="overflow-x-auto">
+        <table class="cockpit-table w-full">
+          <thead>
+            <tr>
+              <th>Code</th><th>Date / Départ</th><th>Ligne</th><th>Bus</th><th>Chauffeur</th>
+              <th>Statut</th><th class="text-right">Retard</th><th class="text-right">Pax</th>
+              <th class="text-right">Charge</th><th class="text-right">Recettes</th>
+              <th class="text-right">Colis</th><th></th>
+            </tr>
+          </thead>
+          <tbody>
+          <?php foreach ($trips as $t):
+            $sm = $statusMeta[$t['status']] ?? $statusMeta['planifie'];
+            $seats = (int)($t['bus_seats'] ?? 0);
+            $sold = (int)($t['sold_count'] ?? 0);
+            $occ = $seats > 0 ? round($sold/$seats*100) : 0;
+            $delay = (int)($t['delay_minutes'] ?? 0);
+          ?>
+            <tr>
+              <td class="mono"><a href="<?= e(url('voyages/'.$t['id'])) ?>" class="text-cb-primary font-bold hover:underline"><?= e($t['trip_code']) ?></a>
+                <?php if ($t['priority'] && $t['priority'] !== 'normale'): ?>
+                  <span class="ml-1 text-[10px] px-1.5 py-0.5 rounded <?= e($priorityMeta[$t['priority']]['cls']) ?>"><?= e($priorityMeta[$t['priority']]['label']) ?></span>
+                <?php endif ?>
+              </td>
+              <td><?= e(date('d/m/Y', strtotime($t['trip_date']))) ?> <span class="text-faint">·</span> <span class="mono"><?= e(substr($t['departure_scheduled'],0,5)) ?></span></td>
+              <td><?= e($t['line_code']) ?> <span class="text-faint">·</span> <?= e($t['line_name']) ?></td>
+              <td class="mono"><?= e($t['bus_code']) ?></td>
+              <td><?= e(trim(($t['driver_first'] ?? '') . ' ' . ($t['driver_last'] ?? ''))) ?: '—' ?></td>
+              <td><span class="cockpit-status <?= match($t['status']) {'en_route'=>'amber','cloture','arrive'=>'green','annule','incident'=>'red',default=>'slate'} ?>"><?= e($sm['label']) ?></span></td>
+              <td class="num text-right <?= $delay > $tolerance ? 'text-red' : ($delay > 0 ? 'text-amber' : 'text-faint') ?>">
+                <?= $delay ? '+' . $delay : '—' ?>
+              </td>
+              <td class="num text-right"><?= $sold ?>/<?= $seats ?></td>
+              <td class="num text-right <?= $occ >= 80 ? 'text-green' : ($occ >= 50 ? 'text-amber' : '') ?>"><?= $occ ?>%</td>
+              <td class="num text-right"><?= e(fcfa((int)$t['revenue'])) ?></td>
+              <td class="num text-right text-faint"><?= (int)($t['parcels_count'] ?? 0) ?></td>
+              <td class="text-right"><a href="<?= e(url('voyages/'.$t['id'])) ?>" class="text-cb-primary hover:underline text-xs">Voir →</a></td>
+            </tr>
+          <?php endforeach ?>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  <?php else: ?>
+
+    <!-- ── Vue cartes (par défaut) ─────────────── -->
+    <div class="grid md:grid-cols-2 xl:grid-cols-3 gap-4">
+      <?php foreach ($trips as $t):
+        $sm    = $statusMeta[$t['status']] ?? $statusMeta['planifie'];
+        $sold  = (int)($t['sold_count'] ?? 0);
+        $seats = (int)($t['bus_seats'] ?? 0);
+        $pct   = $seats > 0 ? min(100, round($sold / $seats * 100)) : 0;
+        $rev   = (int)($t['revenue'] ?? 0);
+        $delay = (int)($t['delay_minutes'] ?? 0);
+        $isLocked = !empty($t['manifest_locked_at']);
+      ?>
+        <a href="<?= e(url('voyages/'.$t['id'])) ?>"
+           class="block bg-white rounded-2xl border border-slate-100 hover:border-cb-primary hover:shadow-soft transition group overflow-hidden">
+          <div class="h-1 <?= match($t['status']) {
+            'en_route'     => 'bg-cb-primary',
+            'embarquement' => 'bg-amber-400',
+            'valide'       => 'bg-cyan-500',
+            'arrive'       => 'bg-emerald-500',
+            'cloture'      => 'bg-emerald-600',
+            'incident'     => 'bg-rose-500',
+            'retourne'     => 'bg-orange-500',
+            'litige'       => 'bg-purple-500',
+            'annule'       => 'bg-rose-400',
+            default        => 'bg-slate-200'
+          } ?>"></div>
+          <div class="p-5 space-y-4">
+            <div class="flex items-start justify-between gap-2">
+              <div class="min-w-0">
+                <div class="flex items-center gap-1.5 flex-wrap">
+                  <span class="font-mono text-xs font-bold text-cb-primary tracking-wide"><?= e($t['trip_code']) ?></span>
+                  <?php if ($t['priority'] && $t['priority'] !== 'normale'): ?>
+                    <span class="text-[10px] px-1.5 py-0.5 rounded font-bold <?= e($priorityMeta[$t['priority']]['cls']) ?>"><?= e($priorityMeta[$t['priority']]['label']) ?></span>
+                  <?php endif ?>
+                  <?php if ($isLocked): ?>
+                    <span class="text-[10px] px-1.5 py-0.5 rounded bg-slate-900 text-white inline-flex items-center gap-0.5"><i data-lucide="lock" class="w-2.5 h-2.5"></i>verrouillé</span>
+                  <?php endif ?>
+                  <?php if ($t['trip_type'] && $t['trip_type'] !== 'commercial'): ?>
+                    <span class="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 uppercase font-bold"><?= e($t['trip_type']) ?></span>
+                  <?php endif ?>
+                </div>
+                <h3 class="font-bold text-slate-900 mt-0.5 leading-tight truncate"><?= e($t['line_code']) ?> · <?= e($t['line_name']) ?></h3>
+                <p class="text-xs text-slate-500 mt-0.5 flex items-center gap-1">
+                  <i data-lucide="calendar" class="w-3 h-3"></i>
+                  <?= e(date('d/m/Y', strtotime($t['trip_date']))) ?> · Départ <?= e(substr($t['departure_scheduled'],0,5)) ?>
+                  <?php if ($delay > $tolerance): ?>
+                    <span class="ml-1 text-rose-600 font-bold">(+<?= $delay ?>min)</span>
+                  <?php elseif ($delay > 0): ?>
+                    <span class="ml-1 text-amber-600">(+<?= $delay ?>min)</span>
+                  <?php endif ?>
+                </p>
+              </div>
+              <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold border <?= $sm['cls'] ?> shrink-0">
+                <i data-lucide="<?= $sm['icon'] ?>" class="w-3 h-3"></i><?= $sm['label'] ?>
+              </span>
+            </div>
+
+            <div class="grid grid-cols-2 gap-3 text-sm">
+              <div class="flex items-center gap-2">
+                <span class="w-7 h-7 rounded-lg bg-slate-100 flex items-center justify-center shrink-0">
+                  <i data-lucide="bus" class="w-3.5 h-3.5 text-slate-500"></i>
+                </span>
+                <div>
+                  <div class="text-xs text-slate-400">Bus</div>
+                  <div class="font-semibold text-slate-700 text-xs"><?= e($t['bus_code']) ?></div>
+                </div>
+              </div>
+              <div class="flex items-center gap-2 min-w-0">
+                <span class="w-7 h-7 rounded-lg bg-slate-100 flex items-center justify-center shrink-0">
+                  <i data-lucide="user" class="w-3.5 h-3.5 text-slate-500"></i>
+                </span>
+                <div class="min-w-0">
+                  <div class="text-xs text-slate-400">Chauffeur</div>
+                  <div class="font-semibold text-slate-700 text-xs truncate"><?= e(trim(($t['driver_first'] ?? '') . ' ' . ($t['driver_last'] ?? ''))) ?: '—' ?></div>
+                </div>
+              </div>
+            </div>
+
+            <div class="pt-3 border-t border-slate-100">
+              <div class="flex items-center justify-between text-xs mb-1.5">
+                <span class="text-slate-500 font-medium flex items-center gap-1">
+                  <i data-lucide="armchair" class="w-3 h-3"></i><?= $sold ?> / <?= $seats ?> places
+                </span>
+                <span class="font-bold <?= $pct >= 80 ? 'text-emerald-600' : ($pct >= 50 ? 'text-amber-600' : 'text-slate-600') ?>"><?= $pct ?>%</span>
+              </div>
+              <div class="h-1.5 rounded-full bg-slate-100">
+                <div class="h-full rounded-full transition-all <?= $pct >= 80 ? 'bg-emerald-500' : ($pct >= 50 ? 'bg-amber-400' : 'bg-cb-primary') ?>" style="width:<?= $pct ?>%"></div>
+              </div>
+              <div class="flex items-center justify-between mt-2 text-xs">
+                <?php if ($rev > 0): ?>
+                  <span class="text-emerald-600 font-semibold flex items-center gap-1">
+                    <i data-lucide="banknote" class="w-3 h-3"></i><?= e(fcfa($rev)) ?>
+                  </span>
+                <?php else: ?>
+                  <span></span>
+                <?php endif ?>
+                <?php if (!empty($t['parcels_count']) && (int)$t['parcels_count'] > 0): ?>
+                  <span class="text-slate-500 flex items-center gap-1">
+                    <i data-lucide="package" class="w-3 h-3"></i><?= (int)$t['parcels_count'] ?> colis
+                  </span>
+                <?php endif ?>
+              </div>
+            </div>
+          </div>
+        </a>
+      <?php endforeach ?>
+    </div>
+
+  <?php endif ?>
+
+  <!-- ── Pagination ───────────────────────────────── -->
+  <?php if ($lastPage > 1): ?>
+    <div class="flex items-center justify-between bg-white rounded-xl border border-slate-100 p-3">
+      <span class="text-xs text-slate-500">
+        Page <?= $page ?> sur <?= $lastPage ?> · <?= (int)$total ?> voyage(s)
+      </span>
+      <div class="flex gap-1">
+        <?php if ($page > 1): ?>
+          <a href="?<?= e($qs(['page' => 1])) ?>" class="px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs hover:bg-slate-50">«</a>
+          <a href="?<?= e($qs(['page' => $page - 1])) ?>" class="px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs hover:bg-slate-50">‹</a>
+        <?php endif ?>
+        <span class="px-3 py-1.5 rounded-lg bg-cb-primary text-white text-xs font-semibold"><?= $page ?></span>
+        <?php if ($page < $lastPage): ?>
+          <a href="?<?= e($qs(['page' => $page + 1])) ?>" class="px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs hover:bg-slate-50">›</a>
+          <a href="?<?= e($qs(['page' => $lastPage])) ?>" class="px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs hover:bg-slate-50">»</a>
+        <?php endif ?>
+      </div>
+    </div>
+  <?php endif ?>
+</div>
+<?php $view->end() ?>

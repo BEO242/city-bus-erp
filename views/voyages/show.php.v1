@@ -1,0 +1,633 @@
+<?php
+/** @var \CityBus\Core\View $view */
+$view->extends('layouts/app');
+
+$booked      = array_flip(array_map('intval', $bookedSeats));
+$totalSeats  = (int)($trip['bus_seats'] ?? 0);
+$soldCount   = count($bookedSeats);
+$occupancy   = $totalSeats > 0 ? round($soldCount / $totalSeats * 100) : 0;
+$revenue     = (int)($trip['total_revenue'] ?? array_sum(array_column($tickets, 'price_fcfa')));
+$crewByRole  = [];
+foreach ($crew as $c) { $crewByRole[$c['role']][] = $c; }
+
+$passengerTickets = array_filter($tickets, fn($t) => in_array($t['ticket_type'], ['passager','arret_route']));
+$baggageTickets   = array_filter($tickets, fn($t) => in_array($t['ticket_type'], ['bagage_franchise','bagage_excedent']));
+
+$statusMeta = [
+  'planifie'     => ['label'=>'Planifié',     'cls'=>'bg-slate-100 text-slate-600 border border-slate-200',       'dot'=>'bg-slate-400'],
+  'embarquement' => ['label'=>'Embarquement', 'cls'=>'bg-amber-50 text-amber-700 border border-amber-200',        'dot'=>'bg-amber-400'],
+  'en_route'     => ['label'=>'En route',     'cls'=>'bg-cb-primary text-white border border-cb-primary',          'dot'=>'bg-white'],
+  'arrive'       => ['label'=>'Arrivé',       'cls'=>'bg-emerald-50 text-emerald-700 border border-emerald-200',  'dot'=>'bg-emerald-500'],
+  'cloture'      => ['label'=>'Clôturé',      'cls'=>'bg-emerald-100 text-emerald-800 border border-emerald-300', 'dot'=>'bg-emerald-600'],
+  'annule'       => ['label'=>'Annulé',       'cls'=>'bg-rose-50 text-rose-600 border border-rose-200',           'dot'=>'bg-rose-400'],
+];
+$sm = $statusMeta[$trip['status']] ?? $statusMeta['planifie'];
+
+$roleLabels = ['chauffeur'=>'Chauffeur (relève)','convoyeur'=>'Convoyeur','caissier'=>'Caissier','controleur'=>'Contrôleur','guide'=>'Guide','autre'=>'Autre'];
+$roleCls    = ['chauffeur'=>'bg-cb-bg text-cb-primary','convoyeur'=>'bg-slate-100 text-slate-600','caissier'=>'bg-blue-50 text-blue-700','controleur'=>'bg-purple-50 text-purple-700','guide'=>'bg-teal-50 text-teal-700','autre'=>'bg-slate-100 text-slate-500'];
+
+$ticketStatusCls = ['emis'=>'bg-slate-100 text-slate-600','valide'=>'bg-blue-50 text-blue-700','arrive'=>'bg-emerald-50 text-emerald-700','annule'=>'bg-rose-50 text-rose-500 line-through'];
+?>
+<?php $view->start('content') ?>
+<div class="space-y-5" x-data="{ tab: 'details' }" x-cloak>
+
+  <!-- ── Fil d'Ariane ────────────────────────────────────────────────── -->
+  <div class="flex items-center gap-2 text-sm text-slate-500">
+    <a href="<?= e(url('voyages')) ?>" class="hover:text-cb-primary transition inline-flex items-center gap-1">
+      <i data-lucide="chevron-left" class="w-4 h-4"></i> Voyages
+    </a>
+    <span>/</span>
+    <span class="text-slate-800 font-mono font-semibold"><?= e($trip['trip_code']) ?></span>
+  </div>
+
+  <!-- ── En-tête voyage ──────────────────────────────────────────────── -->
+  <div class="bg-white rounded-2xl border border-slate-100 shadow-soft p-6">
+    <div class="flex flex-wrap gap-4 items-start justify-between">
+      <div class="flex items-start gap-4">
+        <div class="w-14 h-14 rounded-2xl bg-cb-bg flex items-center justify-center shrink-0">
+          <i data-lucide="bus" class="w-7 h-7 text-cb-primary"></i>
+        </div>
+        <div>
+          <div class="flex items-center gap-2 flex-wrap">
+            <h1 class="text-2xl font-bold text-slate-900"><?= e($trip['line_code']) ?> · <?= e($trip['line_name']) ?></h1>
+            <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-semibold <?= $sm['cls'] ?>">
+              <span class="w-1.5 h-1.5 rounded-full <?= $sm['dot'] ?>"></span>
+              <?= $sm['label'] ?>
+            </span>
+          </div>
+          <p class="text-slate-500 text-sm mt-1 flex items-center gap-3">
+            <span class="flex items-center gap-1">
+              <i data-lucide="calendar" class="w-3.5 h-3.5"></i>
+              <?= e(date_fr($trip['trip_date'])) ?>
+            </span>
+            <span class="flex items-center gap-1">
+              <i data-lucide="clock" class="w-3.5 h-3.5"></i>
+              Départ prévu <?= e(substr($trip['departure_scheduled'], 0, 5)) ?>
+              <?php if (!empty($trip['departure_actual'])): ?>
+                · Réel <?= e(substr($trip['departure_actual'], 0, 5)) ?>
+              <?php endif ?>
+            </span>
+            <?php if (!empty($trip['arrival_actual'])): ?>
+            <span class="flex items-center gap-1">
+              <i data-lucide="map-pin" class="w-3.5 h-3.5"></i>
+              Arrivée <?= e(substr($trip['arrival_actual'], 0, 5)) ?>
+            </span>
+            <?php endif ?>
+          </p>
+          <p class="font-mono text-xs text-slate-400 mt-0.5"><?= e($trip['trip_code']) ?></p>
+        </div>
+      </div>
+      <div class="flex flex-wrap gap-2">
+        <?php if (can('billetterie.create')): ?>
+        <a href="<?= e(url('billetterie/sale/'.$trip['id'])) ?>"
+           class="px-4 py-2.5 rounded-xl bg-cb-primary text-white font-semibold inline-flex items-center gap-2 hover:bg-cb-dark transition shadow-soft">
+          <i data-lucide="ticket" class="w-4 h-4"></i> Vendre ticket
+        </a>
+        <?php endif ?>
+        <?php if (can('voyages.edit')): ?>
+        <a href="<?= e(url('voyages/'.$trip['id'].'/edit')) ?>"
+           class="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-700 font-semibold inline-flex items-center gap-2 hover:bg-slate-50 transition">
+          <i data-lucide="pencil" class="w-4 h-4"></i> Modifier
+        </a>
+        <form method="post" action="<?= e(url('voyages/'.$trip['id'].'/status')) ?>" class="inline">
+          <?= csrf_field() ?>
+          <select name="status" onchange="this.form.submit()" class="cb-input px-3 py-2.5 text-sm">
+            <?php foreach (\CityBus\Models\Trip::STATUSES as $k => $lbl): ?>
+              <option value="<?= e($k) ?>" <?= $trip['status']===$k?'selected':'' ?>><?= e($lbl) ?></option>
+            <?php endforeach ?>
+          </select>
+        </form>
+        <?php endif ?>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── KPI cards ───────────────────────────────────────────────────── -->
+  <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+    <div class="bg-white rounded-2xl border border-slate-100 shadow-soft p-5">
+      <div class="flex items-center justify-between mb-2">
+        <span class="text-xs font-semibold text-slate-500 uppercase tracking-wide">Bus</span>
+        <span class="w-7 h-7 bg-cb-bg rounded-lg flex items-center justify-center">
+          <i data-lucide="bus" class="w-3.5 h-3.5 text-cb-primary"></i>
+        </span>
+      </div>
+      <div class="font-bold text-slate-900"><?= e($trip['bus_code']) ?></div>
+      <div class="text-xs text-slate-400"><?= e($trip['bus_plate']) ?></div>
+    </div>
+    <div class="bg-white rounded-2xl border border-slate-100 shadow-soft p-5">
+      <div class="flex items-center justify-between mb-2">
+        <span class="text-xs font-semibold text-slate-500 uppercase tracking-wide">Chauffeur</span>
+        <span class="w-7 h-7 bg-cb-bg rounded-lg flex items-center justify-center">
+          <i data-lucide="user" class="w-3.5 h-3.5 text-cb-primary"></i>
+        </span>
+      </div>
+      <div class="font-bold text-slate-900 truncate"><?= e($trip['driver_first'].' '.$trip['driver_last']) ?></div>
+      <div class="text-xs text-slate-400"><?= e($trip['driver_matricule'] ?? '') ?></div>
+    </div>
+    <div class="bg-white rounded-2xl border border-slate-100 shadow-soft p-5">
+      <div class="flex items-center justify-between mb-2">
+        <span class="text-xs font-semibold text-slate-500 uppercase tracking-wide">Remplissage</span>
+        <span class="w-7 h-7 bg-emerald-50 rounded-lg flex items-center justify-center">
+          <i data-lucide="armchair" class="w-3.5 h-3.5 text-emerald-600"></i>
+        </span>
+      </div>
+      <div class="font-bold text-slate-900"><?= $soldCount ?> / <?= $totalSeats ?></div>
+      <div class="mt-1.5 h-1.5 rounded-full bg-slate-100">
+        <div class="h-full rounded-full <?= $occupancy >= 80 ? 'bg-emerald-500' : ($occupancy >= 50 ? 'bg-amber-400' : 'bg-cb-primary') ?>"
+             style="width:<?= $occupancy ?>%"></div>
+      </div>
+    </div>
+    <div class="bg-white rounded-2xl border border-slate-100 shadow-soft p-5">
+      <div class="flex items-center justify-between mb-2">
+        <span class="text-xs font-semibold text-slate-500 uppercase tracking-wide">Recettes</span>
+        <span class="w-7 h-7 bg-emerald-50 rounded-lg flex items-center justify-center">
+          <i data-lucide="banknote" class="w-3.5 h-3.5 text-emerald-600"></i>
+        </span>
+      </div>
+      <div class="font-bold text-emerald-600"><?= fcfa($revenue) ?></div>
+      <div class="text-xs text-slate-400"><?= count($tickets) ?> ticket(s)</div>
+    </div>
+  </div>
+
+  <!-- ── Onglets ─────────────────────────────────────────────────────── -->
+  <div class="bg-white rounded-2xl border border-slate-100 shadow-soft overflow-hidden">
+    <!-- Nav tabs -->
+    <div class="border-b border-slate-100 px-6 pt-4 flex gap-1 overflow-x-auto">
+      <?php
+        $showTabs = [
+          'details'    => ['label'=>'Détails',       'icon'=>'info'],
+          'equipage'   => ['label'=>'Équipage',       'icon'=>'users'],
+          'siege'      => ['label'=>'Plan sièges',   'icon'=>'armchair'],
+          'passagers'  => ['label'=>'Passagers',     'icon'=>'user'],
+          'bagages'    => ['label'=>'Bagages',        'icon'=>'package'],
+        ];
+      ?>
+      <?php foreach ($showTabs as $tk => $tm): ?>
+        <button type="button"
+                @click="tab = '<?= $tk ?>'"
+                :class="tab === '<?= $tk ?>'
+                  ? 'text-cb-primary border-b-2 border-cb-primary font-semibold'
+                  : 'text-slate-500 border-b-2 border-transparent hover:text-slate-800'"
+                class="flex items-center gap-2 px-4 py-3 text-sm whitespace-nowrap transition-colors shrink-0">
+          <i data-lucide="<?= $tm['icon'] ?>" class="w-4 h-4"></i>
+          <?= $tm['label'] ?>
+          <?php if ($tk === 'passagers' && $passengerTickets): ?>
+            <span class="ml-0.5 text-xs bg-cb-bg text-cb-primary font-bold px-1.5 rounded-full"><?= count($passengerTickets) ?></span>
+          <?php endif ?>
+          <?php if ($tk === 'bagages' && $baggageTickets): ?>
+            <span class="ml-0.5 text-xs bg-amber-50 text-amber-700 font-bold px-1.5 rounded-full"><?= count($baggageTickets) ?></span>
+          <?php endif ?>
+        </button>
+      <?php endforeach ?>
+    </div>
+
+    <div class="p-6">
+
+      <!-- ═══ Onglet DÉTAILS ══════════════════════════════════════════ -->
+      <div x-show="tab === 'details'" x-transition>
+        <div class="grid sm:grid-cols-2 gap-6">
+          <!-- Colonne gauche -->
+          <div class="space-y-4">
+            <h3 class="cb-form-section">
+              <i data-lucide="route" class="w-4 h-4 text-cb-primary"></i> Itinéraire
+            </h3>
+            <dl class="space-y-3 text-sm">
+              <div class="flex justify-between items-center py-2 border-b border-slate-50">
+                <dt class="text-slate-500 flex items-center gap-1.5"><i data-lucide="hash" class="w-3.5 h-3.5"></i> Code voyage</dt>
+                <dd class="font-mono font-semibold text-cb-primary"><?= e($trip['trip_code']) ?></dd>
+              </div>
+              <div class="flex justify-between items-center py-2 border-b border-slate-50">
+                <dt class="text-slate-500 flex items-center gap-1.5"><i data-lucide="map" class="w-3.5 h-3.5"></i> Ligne</dt>
+                <dd class="font-semibold"><?= e($trip['line_code'].' — '.$trip['line_name']) ?></dd>
+              </div>
+              <div class="flex justify-between items-center py-2 border-b border-slate-50">
+                <dt class="text-slate-500 flex items-center gap-1.5"><i data-lucide="calendar" class="w-3.5 h-3.5"></i> Date</dt>
+                <dd class="font-semibold"><?= e(date_fr($trip['trip_date'])) ?></dd>
+              </div>
+              <div class="flex justify-between items-center py-2 border-b border-slate-50">
+                <dt class="text-slate-500 flex items-center gap-1.5"><i data-lucide="clock" class="w-3.5 h-3.5"></i> Départ prévu</dt>
+                <dd class="font-semibold"><?= e(substr($trip['departure_scheduled'], 0, 5)) ?></dd>
+              </div>
+              <?php if (!empty($trip['arrival_scheduled'])): ?>
+              <div class="flex justify-between items-center py-2 border-b border-slate-50">
+                <dt class="text-slate-500 flex items-center gap-1.5"><i data-lucide="flag" class="w-3.5 h-3.5"></i> Arrivée prévue</dt>
+                <dd class="font-semibold"><?= e(substr($trip['arrival_scheduled'], 0, 5)) ?></dd>
+              </div>
+              <?php endif ?>
+              <?php if (!empty($trip['departure_actual'])): ?>
+              <div class="flex justify-between items-center py-2 border-b border-slate-50">
+                <dt class="text-slate-500 flex items-center gap-1.5"><i data-lucide="clock-4" class="w-3.5 h-3.5"></i> Départ réel</dt>
+                <dd class="font-semibold"><?= e(substr($trip['departure_actual'], 0, 5)) ?></dd>
+              </div>
+              <?php endif ?>
+              <?php if (!empty($trip['arrival_actual'])): ?>
+              <div class="flex justify-between items-center py-2 border-b border-slate-50">
+                <dt class="text-slate-500 flex items-center gap-1.5"><i data-lucide="map-pin" class="w-3.5 h-3.5"></i> Arrivée réelle</dt>
+                <dd class="font-semibold"><?= e(substr($trip['arrival_actual'], 0, 5)) ?></dd>
+              </div>
+              <?php endif ?>
+            </dl>
+          </div>
+
+          <!-- Colonne droite -->
+          <div class="space-y-4">
+            <h3 class="cb-form-section">
+              <i data-lucide="users" class="w-4 h-4 text-cb-primary"></i> Matériel
+            </h3>
+            <dl class="space-y-3 text-sm">
+              <div class="flex justify-between items-center py-2 border-b border-slate-50">
+                <dt class="text-slate-500 flex items-center gap-1.5"><i data-lucide="bus" class="w-3.5 h-3.5"></i> Bus</dt>
+                <dd class="font-semibold"><?= e($trip['bus_code']) ?> · <?= e($trip['bus_plate']) ?></dd>
+              </div>
+              <?php if (!empty($trip['bus_brand'])): ?>
+              <div class="flex justify-between items-center py-2 border-b border-slate-50">
+                <dt class="text-slate-500">Modèle</dt>
+                <dd class="font-semibold"><?= e($trip['bus_brand'].' '.$trip['bus_model']) ?></dd>
+              </div>
+              <?php endif ?>
+              <div class="flex justify-between items-center py-2 border-b border-slate-50">
+                <dt class="text-slate-500 flex items-center gap-1.5"><i data-lucide="armchair" class="w-3.5 h-3.5"></i> Capacité</dt>
+                <dd class="font-semibold"><?= $soldCount ?> / <?= $totalSeats ?> places
+                  <span class="text-xs text-slate-400">(<?= $occupancy ?>%)</span>
+                </dd>
+              </div>
+              <?php if (!empty($trip['mileage_start'])): ?>
+              <div class="flex justify-between items-center py-2 border-b border-slate-50">
+                <dt class="text-slate-500 flex items-center gap-1.5"><i data-lucide="gauge" class="w-3.5 h-3.5"></i> Km départ</dt>
+                <dd class="font-semibold"><?= number_format((int)$trip['mileage_start'], 0, ',', ' ') ?> km</dd>
+              </div>
+              <?php endif ?>
+              <?php if (!empty($trip['mileage_end'])): ?>
+              <div class="flex justify-between items-center py-2 border-b border-slate-50">
+                <dt class="text-slate-500 flex items-center gap-1.5"><i data-lucide="gauge" class="w-3.5 h-3.5"></i> Km arrivée</dt>
+                <dd class="font-semibold"><?= number_format((int)$trip['mileage_end'], 0, ',', ' ') ?> km
+                  <?php if ($trip['mileage_start']): ?>
+                  <span class="text-xs text-emerald-600 font-bold">(+<?= number_format($trip['mileage_end']-$trip['mileage_start'],0,',',' ') ?> km)</span>
+                  <?php endif ?>
+                </dd>
+              </div>
+              <?php endif ?>
+              <?php if (!empty($trip['weather_conditions'])): ?>
+              <div class="flex justify-between items-center py-2 border-b border-slate-50">
+                <dt class="text-slate-500 flex items-center gap-1.5"><i data-lucide="cloud" class="w-3.5 h-3.5"></i> Météo</dt>
+                <dd class="font-semibold text-right max-w-48"><?= e($trip['weather_conditions']) ?></dd>
+              </div>
+              <?php endif ?>
+              <div class="flex justify-between items-center py-2">
+                <dt class="text-slate-500 flex items-center gap-1.5"><i data-lucide="banknote" class="w-3.5 h-3.5"></i> Recettes totales</dt>
+                <dd class="font-bold text-emerald-600 text-base"><?= fcfa($revenue) ?></dd>
+              </div>
+            </dl>
+          </div>
+
+          <?php
+            $_decList = fn(?string $v) => $v ? (is_array(json_decode($v,true)) ? json_decode($v,true) : [$v]) : [];
+            $_notesArr    = array_values(array_filter($_decList($trip['notes'] ?? null)));
+            $_incidentArr = array_values(array_filter($_decList($trip['incident_notes'] ?? null)));
+          ?>
+          <?php if ($_notesArr || $_incidentArr): ?>
+          <div class="sm:col-span-2 space-y-5">
+
+            <?php if ($_notesArr): ?>
+            <div>
+              <h3 class="cb-form-section mb-3">
+                <i data-lucide="file-text" class="w-4 h-4 text-cb-primary"></i> Notes
+                <span class="text-xs bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full font-normal"><?= count($_notesArr) ?></span>
+              </h3>
+              <div class="space-y-2">
+                <?php foreach ($_notesArr as $_ni => $_note): ?>
+                <div class="flex gap-3 bg-slate-50 rounded-xl p-3.5">
+                  <span class="w-5 h-5 rounded-full bg-slate-200 text-slate-600 flex items-center justify-center text-xs font-bold shrink-0 mt-0.5"><?= $_ni+1 ?></span>
+                  <p class="text-sm text-slate-700 whitespace-pre-line"><?= e($_note) ?></p>
+                </div>
+                <?php endforeach ?>
+              </div>
+            </div>
+            <?php endif ?>
+
+            <?php if ($_incidentArr): ?>
+            <div>
+              <h3 class="cb-form-section mb-3">
+                <i data-lucide="alert-triangle" class="w-4 h-4 text-amber-500"></i> Rapport d'incidents
+                <span class="text-xs bg-amber-50 text-amber-600 border border-amber-200 px-2 py-0.5 rounded-full font-normal"><?= count($_incidentArr) ?></span>
+              </h3>
+              <div class="space-y-2">
+                <?php foreach ($_incidentArr as $_ii => $_inc): ?>
+                <div class="flex gap-3 bg-amber-50 border border-amber-200 rounded-xl p-3.5">
+                  <span class="w-5 h-5 rounded-full bg-amber-200 text-amber-700 flex items-center justify-center text-xs font-bold shrink-0 mt-0.5"><?= $_ii+1 ?></span>
+                  <p class="text-sm text-amber-900 whitespace-pre-line"><?= e($_inc) ?></p>
+                </div>
+                <?php endforeach ?>
+              </div>
+            </div>
+            <?php endif ?>
+
+          </div>
+          <?php endif ?>
+
+          <!-- Arrêts de la ligne -->
+          <?php if ($lineStops): ?>
+          <div class="sm:col-span-2">
+            <h3 class="cb-form-section mb-4">
+              <i data-lucide="map-pin" class="w-4 h-4 text-cb-primary"></i> Arrêts de la ligne
+              <span class="text-xs text-slate-400 font-normal"><?= e($trip['line_code']) ?> — <?= e($trip['line_name']) ?></span>
+            </h3>
+            <div class="relative pl-6">
+              <div class="absolute left-2 top-2 bottom-2 w-0.5 bg-slate-200"></div>
+              <?php foreach ($lineStops as $i => $stop): ?>
+                <div class="flex items-start gap-3 mb-4 relative">
+                  <span class="absolute -left-6 w-4 h-4 rounded-full border-2 text-[10px] font-bold flex items-center justify-center shrink-0
+                    <?= $i === 0 ? 'bg-cb-primary border-cb-primary text-white' : ($i === count($lineStops)-1 ? 'bg-emerald-500 border-emerald-500 text-white' : 'bg-white border-slate-300 text-slate-600') ?>">
+                    <?= $i+1 ?>
+                  </span>
+                  <div class="bg-slate-50 rounded-xl px-4 py-2 flex items-center justify-between w-full text-sm">
+                    <span class="font-medium text-slate-800"><?= e($stop['name']) ?></span>
+                    <?php if (!empty($stop['km_from_origin'])): ?>
+                      <span class="text-xs text-slate-400"><?= e($stop['km_from_origin']) ?> km</span>
+                    <?php endif ?>
+                  </div>
+                </div>
+              <?php endforeach ?>
+            </div>
+          </div>
+          <?php endif ?>
+        </div>
+      </div>
+
+      <!-- ═══ Onglet ÉQUIPAGE ══════════════════════════════════════════ -->
+      <div x-show="tab === 'equipage'" x-transition>
+        <!-- Chauffeur principal -->
+        <div class="mb-6">
+          <h3 class="cb-form-section mb-4">
+            <i data-lucide="user" class="w-4 h-4 text-cb-primary"></i> Chauffeur principal
+          </h3>
+          <div class="flex items-center gap-4 bg-cb-bg rounded-2xl p-4 border border-red-100">
+            <div class="w-12 h-12 rounded-2xl bg-cb-primary text-white flex items-center justify-center shrink-0 text-xl font-bold">
+              <?= e(mb_strtoupper(mb_substr($trip['driver_first'],0,1).mb_substr($trip['driver_last'],0,1))) ?>
+            </div>
+            <div>
+              <div class="font-bold text-slate-900"><?= e($trip['driver_first'].' '.$trip['driver_last']) ?></div>
+              <div class="text-sm text-slate-500 flex items-center gap-3 mt-0.5">
+                <span class="flex items-center gap-1"><i data-lucide="hash" class="w-3 h-3"></i><?= e($trip['driver_matricule'] ?? '') ?></span>
+                <?php if (!empty($trip['driver_phone'])): ?>
+                  <span class="flex items-center gap-1"><i data-lucide="phone" class="w-3 h-3"></i><?= e($trip['driver_phone']) ?></span>
+                <?php endif ?>
+              </div>
+            </div>
+            <span class="ml-auto px-3 py-1 rounded-full text-xs font-bold bg-cb-primary text-white">Chauffeur</span>
+          </div>
+        </div>
+
+        <!-- Équipage supplémentaire -->
+        <?php if ($crew): ?>
+        <div>
+          <h3 class="cb-form-section mb-4">
+            <i data-lucide="users" class="w-4 h-4 text-cb-primary"></i>
+            Équipage supplémentaire
+            <span class="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full font-normal"><?= count($crew) ?> membre(s)</span>
+          </h3>
+          <div class="space-y-3">
+            <?php foreach ($crew as $m): ?>
+            <?php
+              $roleLabels = ['chauffeur'=>'Chauffeur (relève)','convoyeur'=>'Convoyeur','caissier'=>'Caissier','controleur'=>'Contrôleur','guide'=>'Guide','autre'=>'Autre'];
+              $roleCls    = ['chauffeur'=>'bg-cb-bg text-cb-primary','convoyeur'=>'bg-slate-100 text-slate-600','caissier'=>'bg-blue-50 text-blue-700','controleur'=>'bg-purple-50 text-purple-700','guide'=>'bg-teal-50 text-teal-700','autre'=>'bg-slate-100 text-slate-500'];
+            ?>
+            <div class="flex items-center gap-4 p-4 rounded-2xl border border-slate-100 hover:bg-slate-50 transition">
+              <div class="w-10 h-10 rounded-xl bg-slate-100 text-slate-600 flex items-center justify-center shrink-0 font-bold text-sm">
+                <?= e(mb_strtoupper(mb_substr($m['first_name'],0,1).mb_substr($m['last_name'],0,1))) ?>
+              </div>
+              <div class="flex-1 min-w-0">
+                <div class="font-semibold text-slate-900 truncate"><?= e($m['first_name'].' '.$m['last_name']) ?></div>
+                <div class="text-xs text-slate-500 flex items-center gap-2 mt-0.5">
+                  <span><?= e($m['matricule'] ?? '') ?></span>
+                  <?php if (!empty($m['phone'])): ?>
+                    <span class="flex items-center gap-1"><i data-lucide="phone" class="w-3 h-3"></i><?= e($m['phone']) ?></span>
+                  <?php endif ?>
+                  <?php if (!empty($m['crew_note'])): ?>
+                    <span class="italic text-slate-400">&mdash; <?= e($m['crew_note']) ?></span>
+                  <?php endif ?>
+                </div>
+              </div>
+              <span class="px-2.5 py-1 rounded-full text-xs font-semibold shrink-0
+                           <?= $roleCls[$m['role']] ?? 'bg-slate-100 text-slate-600' ?>">
+                <?= $roleLabels[$m['role']] ?? $m['role'] ?>
+              </span>
+            </div>
+            <?php endforeach ?>
+          </div>
+        </div>
+        <?php else: ?>
+          <div class="text-center py-10">
+            <i data-lucide="user-plus" class="w-10 h-10 mx-auto text-slate-200 mb-2"></i>
+            <p class="text-slate-400 text-sm">Aucun équipage supplémentaire enregistré.</p>
+            <?php if (can('voyages.edit')): ?>
+            <a href="<?= e(url('voyages/'.$trip['id'].'/edit')) ?>"
+               class="mt-3 inline-flex items-center gap-1.5 text-sm text-cb-primary font-semibold hover:text-cb-dark transition">
+              <i data-lucide="plus" class="w-4 h-4"></i> Ajouter des membres
+            </a>
+            <?php endif ?>
+          </div>
+        <?php endif ?>
+      </div>
+
+      <!-- ═══ Onglet PLAN DES SIÈGES ══════════════════════════════════ -->
+      <div x-show="tab === 'siege'" x-transition>
+        <div class="max-w-2xl mx-auto">
+          <!-- Légende -->
+          <div class="flex gap-6 justify-center mb-6 flex-wrap text-sm">
+            <span class="flex items-center gap-2"><span class="w-4 h-4 rounded border-2 bg-emerald-50 border-emerald-300"></span> Libre</span>
+            <span class="flex items-center gap-2"><span class="w-4 h-4 rounded border-2 bg-rose-100 border-rose-300"></span> Occupé</span>
+          </div>
+
+          <!-- Représentation bus -->
+          <div class="bg-slate-50 rounded-2xl border border-slate-200 p-5">
+            <!-- Cabine chauffeur -->
+            <div class="flex justify-end mb-4">
+              <div class="bg-slate-200 text-slate-600 text-xs font-semibold px-4 py-1.5 rounded-full flex items-center gap-2">
+                <i data-lucide="steering-wheel" class="w-3.5 h-3.5"></i> Chauffeur
+              </div>
+            </div>
+
+            <!-- Grille 2+couloir+2 -->
+            <?php
+              $rows = (int)ceil($totalSeats / 4);
+              $seat = 1;
+            ?>
+            <div class="space-y-2 max-w-xs mx-auto">
+              <?php for ($row = 1; $row <= $rows; $row++): ?>
+              <div class="grid grid-cols-5 gap-2 items-center">
+                <?php
+                  $seatL1 = $seat;
+                  $seatL2 = $seat + 1;
+                  $seatR1 = $seat + 2;
+                  $seatR2 = $seat + 3;
+                  $seat  += 4;
+
+                  foreach ([$seatL1, $seatL2] as $s):
+                    if ($s > $totalSeats): ?>
+                      <div></div>
+                    <?php else:
+                      $bk = isset($booked[$s]);
+                      $passenger = null;
+                      foreach ($tickets as $t) {
+                        if ((int)$t['seat_number'] === $s && $t['status'] !== 'annule') {
+                          $passenger = $t['passenger_name'] ?? null; break;
+                        }
+                      }
+                ?>
+                <div title="<?= $passenger ? e($passenger) : 'Libre' ?>"
+                     class="aspect-square rounded-lg border-2 flex items-center justify-center font-mono text-xs font-bold transition cursor-default
+                            <?= $bk ? 'bg-rose-100 text-rose-700 border-rose-300' : 'bg-white text-slate-600 border-slate-200 hover:border-cb-primary' ?>">
+                  <?= $s ?>
+                </div>
+                    <?php endif ?>
+                  <?php endforeach ?>
+
+                <!-- Couloir -->
+                <div class="flex items-center justify-center">
+                  <div class="h-px w-full bg-slate-200"></div>
+                </div>
+
+                <?php foreach ([$seatR1, $seatR2] as $s):
+                    if ($s > $totalSeats): ?>
+                      <div></div>
+                    <?php else:
+                      $bk = isset($booked[$s]);
+                      $passenger = null;
+                      foreach ($tickets as $t) {
+                        if ((int)$t['seat_number'] === $s && $t['status'] !== 'annule') {
+                          $passenger = $t['passenger_name'] ?? null; break;
+                        }
+                      }
+                ?>
+                <div title="<?= $passenger ? e($passenger) : 'Libre' ?>"
+                     class="aspect-square rounded-lg border-2 flex items-center justify-center font-mono text-xs font-bold transition cursor-default
+                            <?= $bk ? 'bg-rose-100 text-rose-700 border-rose-300' : 'bg-white text-slate-600 border-slate-200 hover:border-cb-primary' ?>">
+                  <?= $s ?>
+                </div>
+                    <?php endif ?>
+                <?php endforeach ?>
+              </div>
+              <?php endfor ?>
+            </div>
+
+            <!-- Arrière du bus -->
+            <div class="flex justify-center mt-4">
+              <div class="bg-slate-200 text-slate-500 text-xs px-4 py-1 rounded-full">— Arrière —</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══ Onglet PASSAGERS ═════════════════════════════════════════ -->
+      <div x-show="tab === 'passagers'" x-transition>
+        <?php if (!$passengerTickets): ?>
+          <div class="text-center py-12">
+            <i data-lucide="users" class="w-10 h-10 mx-auto text-slate-200 mb-2"></i>
+            <p class="text-slate-400 font-medium">Aucun passager enregistré</p>
+          </div>
+        <?php else: ?>
+          <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+              <thead>
+                <tr class="border-b border-slate-100 text-left">
+                  <th class="pb-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Siège</th>
+                  <th class="pb-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Ticket</th>
+                  <th class="pb-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Passager</th>
+                  <th class="pb-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Catégorie</th>
+                  <th class="pb-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Classe</th>
+                  <th class="pb-3 text-xs font-semibold text-slate-500 uppercase tracking-wide text-right">Prix</th>
+                  <th class="pb-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Statut</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-slate-50">
+                <?php foreach ($passengerTickets as $t): ?>
+                <tr class="hover:bg-slate-50 transition">
+                  <td class="py-3 pr-4">
+                    <?php if ($t['seat_number']): ?>
+                    <span class="w-7 h-7 rounded-lg bg-cb-bg text-cb-primary font-bold text-xs flex items-center justify-center"><?= (int)$t['seat_number'] ?></span>
+                    <?php else: ?>
+                    <span class="text-slate-300">—</span>
+                    <?php endif ?>
+                  </td>
+                  <td class="py-3 pr-4 font-mono text-xs text-slate-500"><?= e($t['ticket_number']) ?></td>
+                  <td class="py-3 pr-4">
+                    <div class="font-semibold text-slate-900"><?= e($t['passenger_name'] ?? '—') ?></div>
+                    <?php if (!empty($t['passenger_phone'])): ?>
+                      <div class="text-xs text-slate-400"><?= e($t['passenger_phone']) ?></div>
+                    <?php endif ?>
+                  </td>
+                  <td class="py-3 pr-4 text-slate-600 capitalize"><?= e(str_replace('_',' ',$t['passenger_category'])) ?></td>
+                  <td class="py-3 pr-4 text-slate-600 capitalize"><?= e(str_replace('_',' ',$t['travel_class'])) ?></td>
+                  <td class="py-3 text-right font-semibold text-slate-900"><?= fcfa((int)$t['price_fcfa']) ?></td>
+                  <td class="py-3 pl-4">
+                    <span class="px-2 py-0.5 rounded-full text-xs font-semibold <?= $ticketStatusCls[$t['status']] ?? 'bg-slate-100 text-slate-600' ?>">
+                      <?= e($t['status']) ?>
+                    </span>
+                  </td>
+                </tr>
+                <?php endforeach ?>
+              </tbody>
+              <tfoot>
+                <tr class="border-t-2 border-slate-100">
+                  <td colspan="5" class="pt-3 text-sm font-semibold text-slate-500">Total passagers</td>
+                  <td class="pt-3 text-right font-bold text-emerald-600">
+                  <?= fcfa(array_sum(array_column(array_values($passengerTickets), 'price_fcfa'))) ?>
+                  </td>
+                  <td></td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        <?php endif ?>
+      </div>
+
+      <!-- ═══ Onglet BAGAGES ═══════════════════════════════════════════ -->
+      <div x-show="tab === 'bagages'" x-transition>
+        <?php if (!$baggageTickets): ?>
+          <div class="text-center py-12">
+            <i data-lucide="package" class="w-10 h-10 mx-auto text-slate-200 mb-2"></i>
+            <p class="text-slate-400 font-medium">Aucun ticket bagage</p>
+          </div>
+        <?php else: ?>
+          <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+              <thead>
+                <tr class="border-b border-slate-100 text-left">
+                  <th class="pb-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Ticket</th>
+                  <th class="pb-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Type</th>
+                  <th class="pb-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Passager</th>
+                  <th class="pb-3 text-xs font-semibold text-slate-500 uppercase tracking-wide text-right">Prix</th>
+                  <th class="pb-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Statut</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-slate-50">
+                <?php foreach ($baggageTickets as $t): ?>
+                <tr class="hover:bg-slate-50 transition">
+                  <td class="py-3 pr-4 font-mono text-xs text-slate-500"><?= e($t['ticket_number']) ?></td>
+                  <td class="py-3 pr-4">
+                    <?php
+                      $typeLabel = $t['ticket_type'] === 'bagage_franchise' ? 'Franchise' : 'Excédent';
+                      $typeCls   = $t['ticket_type'] === 'bagage_franchise'
+                        ? 'bg-blue-50 text-blue-700' : 'bg-amber-50 text-amber-700';
+                    ?>
+                    <span class="px-2 py-0.5 rounded-full text-xs font-semibold <?= $typeCls ?>"><?= $typeLabel ?></span>
+                  </td>
+                  <td class="py-3 pr-4 font-semibold text-slate-900"><?= e($t['passenger_name'] ?? '—') ?></td>
+                  <td class="py-3 text-right font-semibold text-slate-900"><?= fcfa((int)$t['price_fcfa']) ?></td>
+                  <td class="py-3 pl-4">
+                    <span class="px-2 py-0.5 rounded-full text-xs font-semibold <?= $ticketStatusCls[$t['status']] ?? 'bg-slate-100 text-slate-600' ?>">
+                      <?= e($t['status']) ?>
+                    </span>
+                  </td>
+                </tr>
+                <?php endforeach ?>
+              </tbody>
+            </table>
+          </div>
+        <?php endif ?>
+      </div>
+    </div>
+  </div>
+</div>
+<?php $view->end() ?>

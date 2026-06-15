@@ -1,0 +1,562 @@
+<?php /** @var \CityBus\Core\View $view */
+$user = auth();
+$role = $user['role'] ?? '';
+$flash = \CityBus\Core\Session::pullFlash();
+$current = $_SERVER['REQUEST_URI'] ?? '';
+
+$navGroups = [
+  'ops' => [
+    'label' => 'Opérations', 'icon' => 'zap',
+    'items' => [
+      ['label' => 'Voyages',      'icon' => 'route',     'url' => url('voyages'),                'perm' => 'voyages.view'],
+      ['label' => 'Billetterie',  'icon' => 'ticket',    'url' => url('billetterie/select-trip'), 'perm' => 'billetterie.view'],
+      ['label' => 'Pré-imprimés', 'icon' => 'tickets',   'url' => url('billetterie/preprint'),    'perm' => 'billetterie.preprint'],
+      ['label' => 'Contrôle',     'icon' => 'scan-line', 'url' => url('controle'),               'perm' => 'controle.view'],
+      ['label' => 'Caisse',       'icon' => 'wallet',    'url' => url('caisse'),                 'perm' => 'caisse.view'],
+      ['label' => 'Reporting',    'icon' => 'bar-chart-3','url' => url('reporting'),              'perm' => 'reporting.view'],
+    ],
+  ],
+  'flotte' => [
+    'label' => 'Flotte', 'icon' => 'bus',
+    'items' => [
+      ['label' => 'Maintenance', 'icon' => 'wrench', 'url' => url('flotte/maintenance'), 'perm' => 'flotte.view'],
+      ['label' => 'Carburant',   'icon' => 'fuel',   'url' => url('flotte/fuel'),        'perm' => 'flotte.view'],
+    ],
+  ],
+  'rh' => [
+    'label' => 'Ressources humaines', 'icon' => 'users',
+    'items' => [
+      ['label' => 'Employés', 'icon' => 'user-check', 'url' => url('rh/employees'), 'perm' => 'rh.view'],
+      ['label' => 'Paie',     'icon' => 'banknote',   'url' => url('rh/payroll'),   'perm' => 'rh.payroll'],
+    ],
+  ],
+  'ref' => [
+    'label' => 'Référentiel', 'icon' => 'database',
+    'guard' => 'referentiel.view',
+    'items' => [
+      ['label' => 'Agences',    'icon' => 'building-2', 'url' => url('referentiel/agencies'), 'perm' => 'referentiel.view'],
+      ['label' => 'Lignes',     'icon' => 'map',        'url' => url('referentiel/lines'),    'perm' => 'referentiel.view'],
+      ['label' => 'Bus',        'icon' => 'bus',        'url' => url('referentiel/buses'),    'perm' => 'referentiel.view'],
+      ['label' => 'Chauffeurs', 'icon' => 'id-card',    'url' => url('referentiel/drivers'),  'perm' => 'referentiel.view'],
+      ['label' => 'Tarifs',     'icon' => 'tags',       'url' => url('referentiel/tariffs'),  'perm' => 'referentiel.view'],
+    ],
+  ],
+  'sys' => [
+    'label' => 'Administration', 'icon' => 'shield-check',
+    'guard' => 'admin.users.view|admin.roles.view|admin.settings.view|admin.audit.view',
+    'items' => [
+      ['label' => 'Utilisateurs',        'icon' => 'user-cog',    'url' => url('admin/users'),    'perm' => 'admin.users.view'],
+      ['label' => 'Rôles & permissions', 'icon' => 'shield',      'url' => url('admin/roles'),    'perm' => 'admin.roles.view'],
+      ['label' => 'Paramètres',          'icon' => 'settings',    'url' => url('admin/settings'), 'perm' => 'admin.settings.view'],
+      ['label' => 'Audit',               'icon' => 'file-search', 'url' => url('admin/audit'),    'perm' => 'admin.audit.view'],
+    ],
+  ],
+];
+// Auto-open the group that contains the current page
+$currentPath = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH) ?? '';
+$defaultGrp  = 'ops';
+foreach ($navGroups as $gKey => $g) {
+  foreach ($g['items'] as $gi) {
+    if (str_contains($currentPath, parse_url($gi['url'], PHP_URL_PATH) ?? '')) {
+      $defaultGrp = $gKey; break 2;
+    }
+  }
+}
+
+// Notifications globales du header (clé indépendante des $alerts de vues)
+$navAlerts = $navAlerts ?? [];
+?><!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="csrf-token" content="<?= e(csrf_token()) ?>">
+  <title><?= e($title ?? 'City Bus ERP') ?> · City Bus</title>
+
+  <link rel="manifest" href="<?= e(asset('manifest.json')) ?>">
+  <meta name="theme-color" content="#C62828">
+  <link rel="icon" href="<?= e(asset('img/favicon.svg')) ?>" type="image/svg+xml">
+
+  <script src="<?= e(asset('css/tailwind.min.js')) ?>"></script>
+  <script>
+    tailwind.config = {
+      theme: { extend: {
+        colors: {
+          cb: {
+            primary:   '#C62828',
+            secondary: '#8E0000',
+            accent:    '#F9A825',
+            dark:      '#6A0000',
+            bg:        '#FFEBEE',
+            red:       '#C62828',
+            red2:      '#8E0000',
+            red3:      '#B71C1C',
+            redlt:     '#FFEBEE',
+            yellow:    '#F9A825',
+            yellowdk:  '#E65100',
+            yellowlt:  '#FFF8E1',
+          }
+        },
+        fontFamily: { sans: ['Inter','system-ui','sans-serif'] },
+        boxShadow: { soft: '0 8px 32px rgba(198,40,40,.08)' }
+      }}
+    }
+  </script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="<?= e(asset('css/app.css')) ?>">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.2/cropper.min.css">
+  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js" defer></script>
+  <script defer src="https://unpkg.com/alpinejs@3.13.5/dist/cdn.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.2/cropper.min.js" defer></script>
+  <script>window._appBase = '<?= e(rtrim(url(''), '/')) ?>';</script>
+  <script src="<?= e(asset('js/media-manager.js')) ?>" defer></script>
+  <style>
+    [x-cloak]  { display: none }
+    .halftone  { background-image: radial-gradient(rgba(255,255,255,.15) 1px, transparent 1px); background-size: 16px 16px; }
+    .sidebar-scroll { scrollbar-width: thin; scrollbar-color: rgba(255,255,255,.15) transparent; }
+    .sidebar-scroll::-webkit-scrollbar { width: 4px; }
+    .sidebar-scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,.15); border-radius: 2px; }
+  </style>
+  <?= $view->section('styles') ?>
+</head>
+<?php
+  $initials     = strtoupper(substr($user['first_name'] ?? '?', 0, 1) . substr($user['last_name'] ?? '', 0, 1));
+  $firstInitial = strtoupper(substr($user['first_name'] ?? '?', 0, 1));
+?>
+<body class="font-sans bg-slate-100 text-slate-800 antialiased min-h-screen">
+
+<div x-data="{ sidebar: true, mobileOpen: false, grp: '<?= $defaultGrp ?>' }" class="flex min-h-screen">
+
+  <!-- Overlay mobile -->
+  <div x-show="mobileOpen" @click="mobileOpen=false" class="fixed inset-0 bg-black/50 z-30 lg:hidden" x-transition></div>
+
+  <!-- ═══ SIDEBAR rouge ═══ -->
+  <aside :class="[sidebar ? 'lg:w-64' : 'lg:w-[60px]', mobileOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0']"
+         class="bg-cb-secondary text-white flex-shrink-0 transition-all duration-200 flex flex-col fixed lg:sticky top-0 h-screen shadow-2xl shadow-black/30 z-40 w-64 lg:flex"
+
+    <!-- Logo -->
+    <div class="h-16 flex items-center justify-between px-4 border-b border-white/10 halftone bg-cb-primary shrink-0">
+      <div class="flex items-center gap-2.5 overflow-hidden min-w-0">
+        <div class="w-8 h-8 rounded-xl bg-cb-yellow flex items-center justify-center shadow-md shrink-0">
+          <i data-lucide="bus" class="w-4 h-4 text-cb-secondary"></i>
+        </div>
+        <div x-show="sidebar" class="leading-none min-w-0">
+          <div class="font-black text-white text-sm tracking-tight">CITY<span class="text-cb-yellow">BUS</span></div>
+          <div class="text-[8px] text-white/50 tracking-widest uppercase">Backoffice ERP</div>
+        </div>
+      </div>
+      <button @click="sidebar=!sidebar" class="text-white/60 hover:text-white transition shrink-0 ml-1">
+        <i data-lucide="chevrons-left" class="w-4 h-4" x-show="sidebar"></i>
+        <i data-lucide="chevrons-right" class="w-4 h-4" x-show="!sidebar"></i>
+      </button>
+    </div>
+
+    <!-- Statut système -->
+    <div x-show="sidebar" class="px-4 py-1.5 bg-black/10 border-b border-white/10 shrink-0">
+      <div class="flex items-center gap-2">
+        <div class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse shrink-0"></div>
+        <span class="text-[9px] text-white/50 uppercase tracking-wider font-semibold">Système opérationnel</span>
+      </div>
+    </div>
+
+    <!-- Navigation -->
+    <nav class="flex-1 px-2.5 py-3 overflow-y-auto sidebar-scroll text-sm">
+
+      <!-- Tableau de bord (toujours visible) -->
+      <?php
+        $dbActive = str_contains($currentPath, parse_url(url('dashboard'), PHP_URL_PATH) ?? '');
+      ?>
+      <a href="<?= e(url('dashboard')) ?>" title="Tableau de bord"
+         class="flex items-center gap-3 px-3 py-2.5 mb-2 rounded-xl transition group <?= $dbActive
+           ? 'bg-cb-yellow text-cb-secondary font-bold shadow-md shadow-black/20'
+           : 'text-white hover:bg-white/10' ?>">
+        <i data-lucide="layout-dashboard" class="w-4 h-4 shrink-0"></i>
+        <span x-show="sidebar" class="whitespace-nowrap">Tableau de bord</span>
+      </a>
+      <div class="border-t border-white/10 mb-2"></div>
+
+      <?php foreach ($navGroups as $gKey => $group):
+        // guard: si le groupe a un guard, vérifier les permissions
+        if (!empty($group['guard'])) {
+          $guards = explode('|', $group['guard']);
+          $allowed = false;
+          foreach ($guards as $g) { if (can(trim($g))) { $allowed = true; break; } }
+          if (!$allowed) continue;
+        }
+        // filtrer les items visibles
+        $visibleItems = array_filter($group['items'], fn($i) => !$i['perm'] || can($i['perm']));
+        if (empty($visibleItems)) continue;
+      ?>
+      <?php $isOpen = ($defaultGrp === $gKey); ?>
+      <div class="mb-1 rounded-xl overflow-hidden transition-all"
+           :class="grp === '<?= $gKey ?>' ? 'bg-black/20 ring-1 ring-white/10' : ''">
+
+        <!-- En-tête accordéon -->
+        <button @click="grp = (grp === '<?= $gKey ?>' ? '' : '<?= $gKey ?>')" x-show="sidebar"
+                class="w-full flex items-center justify-between px-3 py-2 text-left select-none group transition rounded-xl"
+                :class="grp === '<?= $gKey ?>'
+                  ? 'bg-white/10 text-white'
+                  : 'hover:bg-white/5 text-white/50 hover:text-white'">
+          <div class="flex items-center gap-2">
+            <i data-lucide="<?= e($group['icon']) ?>" class="w-3.5 h-3.5 transition"
+               :class="grp === '<?= $gKey ?>' ? 'text-cb-yellow' : 'text-white/40 group-hover:text-white/70'"></i>
+            <span class="text-[10px] uppercase tracking-widest font-extrabold transition"
+                  :class="grp === '<?= $gKey ?>' ? 'text-white' : 'text-white/50 group-hover:text-white'"><?= e($group['label']) ?></span>
+          </div>
+          <i data-lucide="chevron-down" class="w-3.5 h-3.5 transition-transform duration-200"
+             :class="grp === '<?= $gKey ?>' ? 'text-cb-yellow rotate-0' : 'text-white/30 -rotate-90'"></i>
+        </button>
+
+        <!-- Items -->
+        <div x-show="!sidebar || grp === '<?= $gKey ?>'"
+             x-transition:enter="transition-all duration-150 ease-out"
+             x-transition:enter-start="opacity-0 -translate-y-1"
+             x-transition:enter-end="opacity-100 translate-y-0"
+             class="px-1.5 pb-1.5 space-y-0.5">
+          <?php foreach ($visibleItems as $item):
+            $active = str_contains($currentPath, parse_url($item['url'], PHP_URL_PATH) ?? '');
+          ?>
+            <a href="<?= e($item['url']) ?>" title="<?= e($item['label']) ?>"
+               class="flex items-center gap-3 px-3 py-2 rounded-lg transition group text-sm <?= $active
+                 ? 'bg-cb-yellow text-cb-secondary font-bold shadow-sm'
+                 : 'text-white/80 hover:bg-white/10 hover:text-white' ?>">
+              <i data-lucide="<?= e($item['icon']) ?>" class="w-4 h-4 shrink-0 <?= $active ? 'text-cb-secondary' : 'text-white/50 group-hover:text-white group-hover:scale-110 transition-transform' ?>"></i>
+              <span x-show="sidebar" class="whitespace-nowrap font-medium"><?= e($item['label']) ?></span>
+            </a>
+          <?php endforeach ?>
+        </div>
+      </div>
+      <?php endforeach ?>
+
+    </nav>
+
+    <!-- Lien site public -->
+    <div class="px-3 py-2 border-t border-white/10 shrink-0">
+      <a href="<?= e(url('')) ?>" target="_blank" rel="noopener" title="Voir le site public"
+         class="flex items-center gap-2.5 px-2.5 py-1.5 rounded-xl text-white hover:bg-white/10 transition text-xs">
+        <i data-lucide="globe" class="w-4 h-4 shrink-0"></i>
+        <span x-show="sidebar" class="whitespace-nowrap flex-1">Site public</span>
+        <i data-lucide="external-link" class="w-3 h-3 shrink-0" x-show="sidebar"></i>
+      </a>
+    </div>
+
+    <!-- Profil bas sidebar -->
+    <div class="p-3 border-t border-white/10 bg-black/10 shrink-0">
+      <div class="flex items-center gap-2.5 p-2 rounded-xl hover:bg-white/10 cursor-pointer transition">
+        <div class="w-8 h-8 rounded-xl bg-cb-yellow flex items-center justify-center font-black text-cb-secondary text-sm shadow-md shrink-0">
+          <?= e($initials) ?>
+        </div>
+        <div x-show="sidebar" class="min-w-0 flex-1">
+          <p class="text-white text-xs font-bold truncate"><?= e(($user['first_name'] ?? '') . ' ' . ($user['last_name'] ?? '')) ?></p>
+          <p class="text-white/60 text-[10px] truncate"><?= e(ucfirst($role)) ?></p>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ═══ ZONE PRINCIPALE ═══ -->
+  <div class="flex-1 flex flex-col min-w-0">
+
+    <!-- ─ HEADER ─ -->
+    <header
+      x-data="{
+        notif: false, quickAdd: false, profile: false,
+        clock: '',
+        initClock() {
+          this.clock = new Date().toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});
+          setInterval(()=>{ this.clock = new Date().toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'}) }, 30000)
+        }
+      }"
+      x-init="initClock()"
+      class="h-16 bg-white border-b border-slate-100 px-5 flex items-center justify-between sticky top-0 z-30 shadow-sm"
+    >
+      <!-- Gauche -->
+      <div class="flex items-center gap-3">
+        <button @click="mobileOpen=!mobileOpen" class="lg:hidden text-slate-500 hover:text-slate-800 transition">
+          <i data-lucide="menu" class="w-5 h-5"></i>
+        </button>
+        <div class="flex items-center gap-1.5 text-sm">
+          <i data-lucide="home" class="w-3.5 h-3.5 text-cb-primary shrink-0"></i>
+          <span class="text-slate-400 text-xs hidden sm:inline">ERP</span>
+          <i data-lucide="chevron-right" class="w-3 h-3 text-slate-300 hidden sm:inline shrink-0"></i>
+          <span class="font-bold text-slate-900"><?= e($title ?? 'Tableau de bord') ?></span>
+        </div>
+      </div>
+
+      <!-- Droite -->
+      <div class="flex items-center gap-1.5">
+
+        <!-- Heure live -->
+        <div class="hidden lg:flex items-center gap-1.5 bg-slate-100 rounded-lg px-3 h-8 text-slate-600 text-xs font-mono select-none">
+          <i data-lucide="clock" class="w-3 h-3 text-cb-primary"></i>
+          <span x-text="clock"></span>
+        </div>
+
+        <!-- Badge agence -->
+        <?php if (!empty($user['agency_name'])): ?>
+          <span class="hidden md:inline-flex items-center gap-1.5 px-3 h-8 rounded-lg bg-cb-bg text-cb-primary text-xs font-semibold">
+            <i data-lucide="map-pin" class="w-3 h-3"></i><?= e($user['agency_name']) ?>
+          </span>
+        <?php endif ?>
+
+        <!-- Notifications -->
+        <div class="relative">
+          <button @click="notif=!notif; quickAdd=false; profile=false"
+            class="relative w-8 h-8 rounded-lg bg-slate-100 hover:bg-cb-bg hover:text-cb-primary flex items-center justify-center text-slate-500 transition">
+            <i data-lucide="bell" class="w-4 h-4"></i>
+            <?php if (!empty($navAlerts)): ?>
+              <span class="absolute -top-0.5 -right-0.5 w-4 h-4 flex items-center justify-center rounded-full bg-cb-yellow text-cb-secondary text-[9px] font-black leading-none">
+                <?= count($navAlerts) ?>
+              </span>
+            <?php endif ?>
+          </button>
+          <div x-show="notif" @click.outside="notif=false" x-cloak
+            class="absolute right-0 top-10 w-80 bg-white rounded-2xl shadow-2xl border border-slate-100 z-50 overflow-hidden">
+            <div class="bg-gradient-to-r from-cb-primary to-cb-secondary px-4 py-3 flex items-center justify-between">
+              <span class="text-white font-semibold text-sm">Notifications</span>
+              <?php if (!empty($navAlerts)): ?>
+                <span class="bg-cb-yellow text-cb-secondary text-[10px] font-black px-2 py-0.5 rounded-full"><?= count($navAlerts) ?> nouv.</span>
+              <?php endif ?>
+            </div>
+            <ul class="divide-y divide-slate-50 max-h-64 overflow-y-auto">
+              <?php if (!empty($navAlerts)): foreach ($navAlerts as $a): ?>
+                <li class="flex gap-3 px-4 py-3 hover:bg-slate-50 cursor-pointer">
+                  <div class="w-7 h-7 rounded-lg bg-cb-bg flex items-center justify-center shrink-0 mt-0.5">
+                    <i data-lucide="<?= e($a['icon'] ?? 'bell') ?>" class="w-3.5 h-3.5 text-cb-primary"></i>
+                  </div>
+                  <p class="text-xs font-medium text-slate-700 mt-1"><?= e($a['message'] ?? $a['label'] ?? '') ?></p>
+                </li>
+              <?php endforeach; else: ?>
+                <li class="px-4 py-6 text-center text-sm text-slate-400">Aucune notification</li>
+              <?php endif ?>
+            </ul>
+          </div>
+        </div>
+
+        <!-- Créer -->
+        <div class="relative">
+          <button @click="quickAdd=!quickAdd; notif=false; profile=false"
+            class="flex items-center gap-1.5 bg-cb-primary hover:bg-cb-secondary text-white text-xs font-bold px-3 h-8 rounded-lg transition shadow-md shadow-cb-primary/30">
+            <i data-lucide="plus" class="w-3.5 h-3.5"></i>
+            <span class="hidden sm:inline">Créer</span>
+          </button>
+          <div x-show="quickAdd" @click.outside="quickAdd=false" x-cloak
+            class="absolute right-0 top-10 w-44 bg-white rounded-xl shadow-xl border border-slate-100 overflow-hidden z-50 py-1 text-sm">
+            <a href="<?= e(url('billetterie/select-trip')) ?>" class="flex items-center gap-2.5 px-4 py-2.5 hover:bg-cb-bg text-slate-700 hover:text-cb-primary transition">
+              <i data-lucide="ticket" class="w-4 h-4"></i> Ticket
+            </a>
+            <a href="<?= e(url('voyages/create')) ?>" class="flex items-center gap-2.5 px-4 py-2.5 hover:bg-cb-bg text-slate-700 hover:text-cb-primary transition">
+              <i data-lucide="bus" class="w-4 h-4"></i> Voyage
+            </a>
+            <?php if (can('rh.view')): ?>
+              <a href="<?= e(url('rh/employees')) ?>" class="flex items-center gap-2.5 px-4 py-2.5 hover:bg-cb-bg text-slate-700 hover:text-cb-primary transition">
+                <i data-lucide="user-plus" class="w-4 h-4"></i> Agent
+              </a>
+            <?php endif ?>
+          </div>
+        </div>
+
+        <!-- Profil -->
+        <div class="relative">
+          <button @click="profile=!profile; notif=false; quickAdd=false"
+            class="flex items-center gap-2 bg-slate-100 hover:bg-slate-200 rounded-lg pl-1 pr-3 h-8 text-slate-700 transition">
+            <div class="w-6 h-6 rounded-md bg-gradient-to-br from-cb-primary to-cb-secondary flex items-center justify-center text-white font-black text-xs shadow-sm">
+              <?= e($firstInitial) ?>
+            </div>
+            <span class="hidden sm:block text-xs font-semibold truncate max-w-[80px]"><?= e($user['first_name'] ?? '') ?></span>
+            <i data-lucide="chevron-down" class="w-3 h-3 text-slate-400 shrink-0" :class="profile ? 'rotate-180' : ''"></i>
+          </button>
+          <div x-show="profile" @click.outside="profile=false" x-cloak
+            class="absolute right-0 top-10 w-52 bg-white rounded-xl shadow-xl border border-slate-100 overflow-hidden z-50 py-1 text-sm">
+            <div class="px-4 py-3 border-b border-slate-100">
+              <p class="font-bold text-slate-800 text-sm"><?= e(($user['first_name'] ?? '') . ' ' . ($user['last_name'] ?? '')) ?></p>
+              <p class="text-[11px] text-slate-400 mt-0.5"><?= e($user['email'] ?? '') ?></p>
+            </div>
+            <a href="<?= e(url('profile')) ?>" class="flex items-center gap-2.5 px-4 py-2.5 hover:bg-slate-50 text-slate-700 transition">
+              <i data-lucide="user" class="w-4 h-4 text-cb-primary"></i> Mon profil
+            </a>
+            <div class="border-t border-slate-100 my-1"></div>
+            <form method="post" action="<?= e(url('logout')) ?>">
+              <?= csrf_field() ?>
+              <button type="submit" class="w-full text-left flex items-center gap-2.5 px-4 py-2.5 hover:bg-cb-bg text-cb-primary transition">
+                <i data-lucide="log-out" class="w-4 h-4"></i> Déconnexion
+              </button>
+            </form>
+          </div>
+        </div>
+
+      </div>
+    </header>
+
+    <!-- Flash messages -->
+    <?php if (!empty($flash)): ?>
+      <div class="px-5 pt-4 space-y-2">
+        <?php foreach ($flash as $type => $msgs): foreach ($msgs as $msg):
+          $cls = match($type) {
+            'success' => 'bg-emerald-50 border-emerald-200 text-emerald-800',
+            'danger'  => 'bg-rose-50 border-rose-200 text-rose-800',
+            'warning' => 'bg-amber-50 border-amber-200 text-amber-800',
+            default   => 'bg-cb-bg border-cb-accent/30 text-cb-dark',
+          };
+          $icon = match($type) {
+            'success' => 'check-circle-2', 'danger' => 'x-circle',
+            'warning' => 'alert-triangle', default => 'info',
+          };
+        ?>
+          <div class="flex items-center gap-3 p-3.5 rounded-xl border <?= $cls ?>"
+               x-data="{ show:true }" x-show="show" x-transition.duration.300ms x-init="setTimeout(()=>show=false, 5000)">
+            <i data-lucide="<?= e($icon) ?>" class="w-5 h-5 shrink-0"></i>
+            <span class="flex-1"><?= e($msg) ?></span>
+            <button @click="show=false"><i data-lucide="x" class="w-4 h-4"></i></button>
+          </div>
+        <?php endforeach; endforeach ?>
+      </div>
+    <?php endif ?>
+
+    <main class="flex-1 p-5">
+      <?= $__content ?? '' ?>
+    </main>
+
+    <footer class="px-5 py-3 text-xs text-slate-400 border-t border-slate-100 bg-white">
+      © <?= date('Y') ?> City Bus ERP — <span class="text-cb-primary font-semibold">Brazzaville ↔ Pointe-Noire</span>
+    </footer>
+  </div>
+</div>
+
+<script src="<?= e(asset('js/app.js')) ?>"></script>
+<?= $view->section('scripts') ?>
+<script>
+  document.addEventListener('DOMContentLoaded', () => { if (window.lucide) lucide.createIcons(); });
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('<?= e(asset('service-worker.js')) ?>').catch(() => {});
+  }
+
+  // ── Dirty-form guard ──────────────────────────────────────────────────────
+  // Active la désactivation du bouton de mise à jour pour les formulaires
+  // marqués explicitement (data-dirty-watch="1").
+  (function () {
+    const initialized = new WeakSet();
+
+    function formSnapshot(form) {
+      return new URLSearchParams(new FormData(form)).toString();
+    }
+
+    function shouldWatch(form) {
+      if (form.hasAttribute('data-no-dirty')) return false;
+
+      const explicit = form.getAttribute('data-dirty-watch');
+      if (explicit !== null) return explicit === '1';
+
+      const methodInput = form.querySelector('input[name="_method"]');
+      const method = ((methodInput && methodInput.value) || '').toUpperCase();
+      return method === 'PUT' || method === 'PATCH';
+    }
+
+    function targetButtons(form) {
+      const explicitBtns = Array.from(form.querySelectorAll('[data-dirty-submit]'));
+      if (explicitBtns.length) return explicitBtns;
+
+      return Array.from(form.querySelectorAll('button[type="submit"], button:not([type]), input[type="submit"]'))
+        .filter(function (btn) {
+          return !btn.closest('[data-no-dirty]') && !btn.classList.contains('btn-danger');
+        });
+    }
+
+    function initForm(form) {
+      if (initialized.has(form) || !shouldWatch(form)) return;
+
+      const submitBtns = targetButtons(form);
+      if (!submitBtns.length) return;
+
+      initialized.add(form);
+      let initial = formSnapshot(form);
+      let dirty = false;
+
+      function lockButton(btn) {
+        // Garder un rendu grisé même si un framework manipule l'attribut disabled.
+        btn.classList.add('opacity-50', 'cursor-not-allowed');
+        btn.dataset.dirtyLocked = '1';
+
+        const hasDynamicDisabled =
+          btn.hasAttribute(':disabled') ||
+          btn.hasAttribute('x-bind:disabled') ||
+          btn.hasAttribute('v-bind:disabled');
+
+        if (!hasDynamicDisabled) {
+          btn.setAttribute('disabled', 'disabled');
+        }
+      }
+
+      function unlockButton(btn) {
+        btn.classList.remove('opacity-50', 'cursor-not-allowed');
+        delete btn.dataset.dirtyLocked;
+        btn.removeAttribute('disabled');
+      }
+
+      function update() {
+        const changed = formSnapshot(form) !== initial;
+        if (changed === dirty) return;
+        dirty = changed;
+        submitBtns.forEach(function (btn) {
+          if (dirty) {
+            unlockButton(btn);
+          } else {
+            lockButton(btn);
+          }
+        });
+
+        function resetBaseline() {
+          initial = formSnapshot(form);
+          dirty = false;
+          submitBtns.forEach(function (btn) {
+            lockButton(btn);
+          });
+        }
+      }
+
+      update();
+      form.addEventListener('input', update);
+      form.addEventListener('change', update);
+      form.addEventListener('reset', function () {
+        setTimeout(update, 0);
+      });
+      form.addEventListener('submit', function (event) {
+        if (!dirty) {
+          event.preventDefault();
+          update();
+        }
+      });
+      window.addEventListener('pageshow', update);
+
+      // Recalibrer l'état initial après hydratation Alpine / bindings dynamiques.
+      setTimeout(resetBaseline, 0);
+      if (window.requestAnimationFrame) {
+        requestAnimationFrame(function () {
+          requestAnimationFrame(resetBaseline);
+        });
+      }
+    }
+
+    function scanForms() {
+      document.querySelectorAll('form').forEach(function (form) {
+        initForm(form);
+      });
+    }
+
+    scanForms();
+
+    const observer = new MutationObserver(function () {
+      scanForms();
+    });
+
+    observer.observe(document.body, {
+      subtree: true,
+      childList: true,
+      attributes: true,
+      attributeFilter: ['data-dirty-watch']
+    });
+  })();
+</script>
+</body>
+</html>

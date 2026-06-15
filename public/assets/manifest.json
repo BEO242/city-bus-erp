@@ -1,0 +1,20 @@
+{
+  "name": "City Bus ERP",
+  "short_name": "CityBus",
+  "description": "ERP de gestion de transport en commun — Brazzaville ↔ Pointe-Noire",
+  "start_url": "/City%20bus/public/",
+  "scope": "/City%20bus/public/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "theme_color": "#1565C0",
+  "background_color": "#F0F4FF",
+  "lang": "fr",
+  "icons": [
+    {
+      "src": "img/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

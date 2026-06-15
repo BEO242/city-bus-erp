@@ -1,0 +1,408 @@
+<?php
+
+declare(strict_types=1);
+
+namespace CityBus\Controllers\Voyage;
+
+use CityBus\Controllers\Controller;
+use CityBus\Core\Auth;
+use CityBus\Core\Database;
+use CityBus\Core\Request;
+use CityBus\Models\AuditLog;
+use CityBus\Services\TripService;
+
+final class TripController extends Controller
+{
+    public function __construct(private TripService $service = new TripService()) {}
+
+    // ── Données communes formulaire ──────────────────────────────────────
+    private function formData(): array
+    {
+        return [
+            'lines'      => Database::select("SELECT l.id, l.code, l.name, cd.slug AS departure_city, cd.name AS departure_city_name, ca.slug AS arrival_city, ca.name AS arrival_city_name, l.distance_km, l.duration_hours FROM bus_lines l JOIN cities cd ON cd.id=l.departure_city_id JOIN cities ca ON ca.id=l.arrival_city_id WHERE l.is_active=1 ORDER BY l.code"),
+            'buses'      => Database::select("SELECT id, code, plate, seats FROM buses WHERE status IN ('disponible','en_voyage','maintenance') ORDER BY code"),
+            'drivers'    => Database::select("SELECT id, matricule, first_name, last_name, license_number FROM employees WHERE position='chauffeur' AND status='actif' ORDER BY last_name"),
+            'staff'      => Database::select("SELECT id, matricule, first_name, last_name, position FROM employees WHERE status='actif' ORDER BY position, last_name"),
+            'stops'      => Database::select("SELECT s.id, s.name, s.line_id, s.order_position, s.km_from_origin FROM stops s ORDER BY s.line_id, s.order_position"),
+        ];
+    }
+
+    public function index(Request $request): void
+    {
+        // Auto-clôture des voyages arrivés depuis longtemps (paramétrable, 0 = désactivé)
+        $autoCloseMin = max(0, \CityBus\Core\Setting::getInt('voyage.auto_close_minutes', 0));
+        if ($autoCloseMin > 0) {
+            Database::execute(
+                "UPDATE trips
+                    SET status='cloture'
+                  WHERE status='arrive'
+                    AND arrival_actual IS NOT NULL
+                    AND TIMESTAMPDIFF(MINUTE, arrival_actual, NOW()) >= ?",
+                [$autoCloseMin]
+            );
+        }
+
+        $dateFrom = $request->input('date_from', date('Y-m-d'));
+        $dateTo   = $request->input('date_to',   date('Y-m-d'));
+        $status   = $request->input('status', '');
+        $lineId   = (int)$request->input('line_id', 0);
+        $search   = trim($request->input('search', ''));
+
+        // date_to doit être >= date_from
+        if ($dateTo < $dateFrom) { $dateTo = $dateFrom; }
+
+        $where  = 'tr.trip_date BETWEEN ? AND ?';
+        $params = [$dateFrom, $dateTo];
+        if ($status) { $where .= ' AND tr.status = ?'; $params[] = $status; }
+        if ($lineId) { $where .= ' AND tr.line_id = ?'; $params[] = $lineId; }
+        if ($search) {
+            $where .= ' AND (tr.trip_code LIKE ? OR b.code LIKE ? OR b.plate LIKE ? OR CONCAT(e.first_name," ",e.last_name) LIKE ?)';
+            $like = "%$search%";
+            array_push($params, $like, $like, $like, $like);
+        }
+
+        $trips = Database::select(
+            "SELECT tr.*,
+                    l.code AS line_code, l.name AS line_name,
+                    b.code AS bus_code, b.plate AS bus_plate, b.seats AS bus_seats,
+                    e.first_name AS driver_first, e.last_name AS driver_last,
+                    (SELECT COUNT(*) FROM tickets tk
+                     WHERE tk.trip_id=tr.id AND tk.status!='annule' AND tk.deleted_at IS NULL
+                       AND tk.ticket_type IN ('passager','arret_route')) AS sold_count,
+                    (SELECT COALESCE(SUM(tk.price_fcfa),0) FROM tickets tk
+                     WHERE tk.trip_id=tr.id AND tk.status!='annule' AND tk.deleted_at IS NULL) AS revenue
+             FROM trips tr
+             JOIN bus_lines l ON l.id = tr.line_id
+             JOIN buses b ON b.id = tr.bus_id
+             LEFT JOIN employees e ON e.id = tr.driver_id
+             WHERE $where
+             ORDER BY tr.trip_date DESC, tr.departure_scheduled ASC",
+            $params
+        );
+
+        $lines = Database::select("SELECT id, code, name FROM bus_lines WHERE is_active=1 ORDER BY code");
+
+        $this->view('voyages/index', [
+            'title'    => 'Voyages',
+            'trips'    => $trips,
+            'lines'    => $lines,
+            'dateFrom' => $dateFrom,
+            'dateTo'   => $dateTo,
+            'status'   => $status,
+            'lineId'   => $lineId,
+            'search'   => $search,
+        ]);
+    }
+
+    public function create(Request $request): void
+    {
+        $this->view('voyages/form', array_merge($this->formData(), [
+            'title' => 'Nouveau voyage',
+            'trip'  => null,
+            'crew'  => [],
+        ]));
+    }
+
+    public function store(Request $request): void
+    {
+        if (!Auth::can('voyages.create')) {
+            $this->flash('danger', 'Permission refusée.');
+            back();
+            return;
+        }
+        $data = $this->validate($request, [
+            'line_id'             => 'required|integer',
+            'bus_id'              => 'required|integer',
+            'driver_id'           => 'required|integer',
+            'trip_date'           => 'required|date',
+            'departure_scheduled' => 'required',
+        ]);
+        $data['line_id']           = (int)$data['line_id'];
+        $data['bus_id']            = (int)$data['bus_id'];
+        $data['driver_id']         = (int)$data['driver_id'];
+        $data['arrival_scheduled'] = $request->input('arrival_scheduled') ?: null;
+        $data['mileage_start']     = $request->input('mileage_start') !== '' ? (int)$request->input('mileage_start') : null;
+        $data['weather_conditions']= $request->input('weather_conditions') ?: null;
+        $notesArr = array_values(array_filter(array_map('trim', (array)$request->input('notes', []))));
+        $data['notes'] = $notesArr ? json_encode($notesArr, JSON_UNESCAPED_UNICODE) : null;
+
+        // Repos minimum chauffeur (paramètre voyage.min_driver_rest_hours)
+        $restH = max(0, \CityBus\Core\Setting::getInt('voyage.min_driver_rest_hours', 0));
+        if ($restH > 0) {
+            $departTs = strtotime((string)$data['trip_date'] . ' ' . (string)$data['departure_scheduled']);
+            if ($departTs !== false) {
+                $lastTrip = Database::selectOne(
+                    "SELECT trip_date, COALESCE(arrival_actual, arrival_scheduled, departure_scheduled) AS end_ts
+                       FROM trips
+                      WHERE driver_id = ? AND status != 'annule'
+                      ORDER BY trip_date DESC, departure_scheduled DESC LIMIT 1",
+                    [$data['driver_id']]
+                );
+                if ($lastTrip && !empty($lastTrip['end_ts'])) {
+                    $lastEndTs = strtotime((string)$lastTrip['trip_date'] . ' ' . (string)$lastTrip['end_ts']);
+                    if ($lastEndTs !== false && ($departTs - $lastEndTs) < $restH * 3600) {
+                        $this->flash('danger', sprintf(
+                            "Repos chauffeur insuffisant : minimum %d h requis depuis le dernier voyage.",
+                            $restH
+                        ));
+                        back(); return;
+                    }
+                }
+            }
+        }
+
+        try {
+            $id = $this->service->create($data);
+        } catch (\Throwable $e) {
+            $this->flash('danger', $e->getMessage());
+            back(); return;
+        }
+
+        // Enregistrer l'équipage supplémentaire
+        $crewIds   = (array)$request->input('crew_employee_id', []);
+        $crewRoles = (array)$request->input('crew_role', []);
+        $crewNotes = (array)$request->input('crew_notes', []);
+        foreach ($crewIds as $i => $empId) {
+            $empId = (int)$empId;
+            if ($empId <= 0) continue;
+            $role  = $crewRoles[$i] ?? 'convoyeur';
+            $note  = $crewNotes[$i] ?? null;
+            Database::execute(
+                "INSERT IGNORE INTO trip_crew (trip_id, employee_id, role, notes) VALUES (?,?,?,?)",
+                [$id, $empId, $role, $note ?: null]
+            );
+        }
+
+        $this->flash('success', 'Voyage créé avec succès.');
+        AuditLog::record('trip.create', 'trip', $id, [
+            'line_id'   => $data['line_id'],
+            'bus_id'    => $data['bus_id'],
+            'trip_date' => $data['trip_date'],
+        ]);
+        redirect("voyages/$id");
+    }
+
+    public function edit(Request $request, string $id): void
+    {
+        $trip = Database::selectOne("SELECT * FROM trips WHERE id=?", [$id]);
+        if (!$trip) { http_response_code(404); $this->view('errors/404'); return; }
+
+        $crew = Database::select(
+            "SELECT tc.role, tc.notes AS crew_note,
+                    e.id AS emp_id, e.first_name, e.last_name, e.matricule, e.phone, e.position
+             FROM trip_crew tc JOIN employees e ON e.id=tc.employee_id
+             WHERE tc.trip_id=? ORDER BY tc.role, e.last_name",
+            [$id]
+        );
+
+        $this->view('voyages/form', array_merge($this->formData(), [
+            'title' => 'Modifier voyage ' . $trip['trip_code'],
+            'trip'  => $trip,
+            'crew'  => $crew,
+        ]));
+    }
+
+    public function update(Request $request, string $id): void
+    {
+        if (!Auth::can('voyages.update')) {
+            $this->flash('danger', 'Permission refusée.');
+            back(); return;
+        }
+        $trip = Database::selectOne("SELECT id FROM trips WHERE id=?", [$id]);
+        if (!$trip) { http_response_code(404); $this->view('errors/404'); return; }
+
+        $data = $this->validate($request, [
+            'line_id'             => 'required|integer',
+            'bus_id'              => 'required|integer',
+            'driver_id'           => 'required|integer',
+            'trip_date'           => 'required|date',
+            'departure_scheduled' => 'required',
+        ]);
+
+        // Détection de conflit bus/chauffeur (hors voyage courant)
+        try {
+            $this->service->assertNoConflictPublic(
+                (int)$data['bus_id'],
+                (int)$data['driver_id'],
+                (string)$data['trip_date'],
+                (string)$data['departure_scheduled'],
+                $request->input('arrival_scheduled') ?: null,
+                (int)$id
+            );
+        } catch (\Throwable $e) {
+            $this->flash('danger', $e->getMessage());
+            back(); return;
+        }
+
+        Database::execute(
+            "UPDATE trips SET
+                line_id=?, bus_id=?, driver_id=?,
+                trip_date=?, departure_scheduled=?, arrival_scheduled=?,
+                departure_actual=?, arrival_actual=?,
+                mileage_start=?, mileage_end=?,
+                weather_conditions=?, notes=?, incident_notes=?,
+                updated_at=NOW()
+             WHERE id=?",
+            [
+                (int)$data['line_id'], (int)$data['bus_id'], (int)$data['driver_id'],
+                $data['trip_date'], $data['departure_scheduled'],
+                $request->input('arrival_scheduled') ?: null,
+                $request->input('departure_actual')  ?: null,
+                $request->input('arrival_actual')    ?: null,
+                $request->input('mileage_start') !== '' ? (int)$request->input('mileage_start') : null,
+                $request->input('mileage_end')   !== '' ? (int)$request->input('mileage_end')   : null,
+                $request->input('weather_conditions') ?: null,
+                (function() use ($request) {
+                    $a = array_values(array_filter(array_map('trim', (array)$request->input('notes', []))));
+                    return $a ? json_encode($a, JSON_UNESCAPED_UNICODE) : null;
+                })(),
+                (function() use ($request) {
+                    $a = array_values(array_filter(array_map('trim', (array)$request->input('incident_notes', []))));
+                    return $a ? json_encode($a, JSON_UNESCAPED_UNICODE) : null;
+                })(),
+                (int)$id,
+            ]
+        );
+
+        // Remplacer l'équipage
+        Database::execute("DELETE FROM trip_crew WHERE trip_id=?", [(int)$id]);
+        $crewIds   = (array)$request->input('crew_employee_id', []);
+        $crewRoles = (array)$request->input('crew_role', []);
+        $crewNotes = (array)$request->input('crew_notes', []);
+        foreach ($crewIds as $i => $empId) {
+            $empId = (int)$empId;
+            if ($empId <= 0) continue;
+            $role  = $crewRoles[$i] ?? 'convoyeur';
+            $note  = $crewNotes[$i] ?? null;
+            Database::execute(
+                "INSERT IGNORE INTO trip_crew (trip_id, employee_id, role, notes) VALUES (?,?,?,?)",
+                [(int)$id, $empId, $role, $note ?: null]
+            );
+        }
+
+        \CityBus\Models\AuditLog::record('trip.update', 'trip', (int)$id, []);
+        $this->flash('success', 'Voyage mis à jour.');
+        redirect("voyages/$id");
+    }
+
+    public function show(Request $request, string $id): void
+    {
+        $trip = Database::selectOne(
+            "SELECT tr.*,
+                    l.name AS line_name, l.code AS line_code,
+                    cd.slug AS departure_city, cd.name AS departure_city_name,
+                    ca.slug AS arrival_city,   ca.name AS arrival_city_name,
+                    l.distance_km, l.duration_hours,
+                    b.code AS bus_code, b.plate AS bus_plate, b.seats AS bus_seats,
+                    b.brand AS bus_brand, b.model AS bus_model,
+                    e.first_name AS driver_first, e.last_name AS driver_last,
+                    e.matricule AS driver_matricule, e.phone AS driver_phone,
+                    (SELECT COALESCE(SUM(tk.price_fcfa),0) FROM tickets tk
+                     WHERE tk.trip_id=tr.id AND tk.status!='annule' AND tk.deleted_at IS NULL) AS total_revenue
+             FROM trips tr
+             JOIN bus_lines l ON l.id=tr.line_id
+             JOIN cities cd ON cd.id=l.departure_city_id
+             JOIN cities ca ON ca.id=l.arrival_city_id
+             JOIN buses b ON b.id=tr.bus_id
+             LEFT JOIN employees e ON e.id=tr.driver_id
+             WHERE tr.id=?", [$id]
+        );
+        if (!$trip) { http_response_code(404); $this->view('errors/404'); return; }
+
+        $tickets = Database::select(
+            "SELECT * FROM tickets WHERE trip_id=? AND deleted_at IS NULL ORDER BY seat_number, sold_at",
+            [$id]
+        );
+        $bookedSeats = $this->service->bookedSeats((int)$id);
+
+        $crew = Database::select(
+            "SELECT tc.role, tc.notes AS crew_note,
+                    e.id AS emp_id, e.first_name, e.last_name, e.matricule, e.phone, e.position
+             FROM trip_crew tc
+             JOIN employees e ON e.id=tc.employee_id
+             WHERE tc.trip_id=? ORDER BY tc.role, e.last_name",
+            [$id]
+        );
+
+        $lineStops = Database::select(
+            "SELECT s.id, s.name, s.order_position, s.km_from_origin
+             FROM stops s WHERE s.line_id=? ORDER BY s.order_position",
+            [$trip['line_id']]
+        );
+
+        $this->view('voyages/show', [
+            'title'       => 'Voyage ' . $trip['trip_code'],
+            'trip'        => $trip,
+            'tickets'     => $tickets,
+            'bookedSeats' => $bookedSeats,
+            'crew'        => $crew,
+            'lineStops'   => $lineStops,
+        ]);
+    }
+
+    /** Manifeste passagers PDF (GAP-07). */
+    public function manifest(Request $request, string $id): void
+    {
+        $trip = \CityBus\Core\Database::selectOne(
+            "SELECT tr.*, l.code AS line_code, l.name AS line_name,
+                    b.code AS bus_code, b.plate, b.brand, b.model
+             FROM trips tr
+             LEFT JOIN bus_lines l ON l.id = tr.line_id
+             LEFT JOIN buses b ON b.id = tr.bus_id
+             WHERE tr.id = ?", [(int)$id]
+        );
+        if (!$trip) { http_response_code(404); $this->view('errors/404'); return; }
+
+        $tickets = \CityBus\Core\Database::select(
+            "SELECT t.*, sf.name AS boarding_name, st.name AS alighting_name
+             FROM tickets t
+             LEFT JOIN stops sf ON sf.id = t.boarding_stop_id
+             LEFT JOIN stops st ON st.id = t.alighting_stop_id
+             WHERE t.trip_id = ? AND t.deleted_at IS NULL
+               AND t.status IN ('emis','controle','utilise','embarque')
+             ORDER BY t.seat_number ASC, t.ticket_number ASC", [(int)$id]
+        );
+        $crew = \CityBus\Core\Database::select(
+            "SELECT tc.role, e.first_name, e.last_name, e.matricule, e.phone
+             FROM trip_crew tc
+             JOIN employees e ON e.id = tc.employee_id
+             WHERE tc.trip_id = ?", [(int)$id]
+        );
+
+        $pdf = (new \CityBus\Services\PdfService())->generateTripManifest($trip, $tickets, $crew);
+        \CityBus\Core\Response::download(BASE_PATH . '/storage/' . $pdf, "manifeste-{$trip['trip_code']}.pdf", 'application/pdf');
+    }
+
+    public function changeStatus(Request $request, string $id): void
+    {
+        if (!\CityBus\Core\Auth::can('voyages.update')) {
+            $this->flash('danger', 'Permission refusée.');
+            back(); return;
+        }
+        $status = $request->input('status');
+        if (!array_key_exists($status, \CityBus\Models\Trip::STATUSES)) {
+            $this->flash('danger', 'Statut invalide.');
+            back(); return;
+        }
+        try {
+            $this->service->changeStatus((int)$id, $status);
+            // Auto-compute P&L (GAP-22) + auto-log HOS (GAP-13) à la clôture
+            if ($status === 'cloture') {
+                try {
+                    (new \CityBus\Services\TripPnlService())->compute((int)$id, (int)\CityBus\Core\Auth::id());
+                } catch (\Throwable $e) {
+                    \CityBus\Core\Logger::warning('trip_pnl.compute_failed: ' . $e->getMessage());
+                }
+                try {
+                    (new \CityBus\Services\DriverHosService())->autoLogFromTrip((int)$id);
+                } catch (\Throwable $e) {
+                    \CityBus\Core\Logger::warning('hos.auto_log_failed: ' . $e->getMessage());
+                }
+            }
+            $this->flash('success', 'Statut mis à jour.');
+        } catch (\Throwable $e) {
+            $this->flash('danger', $e->getMessage());
+        }
+        back();
+    }
+}

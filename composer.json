@@ -1,0 +1,47 @@
+{
+    "name": "citybus/erp",
+    "description": "City Bus ERP — Système de gestion de transport inter-urbain (PHP pur)",
+    "type": "project",
+    "license": "proprietary",
+    "require": {
+        "php": ">=8.2",
+        "ext-json": "*",
+        "ext-mbstring": "*",
+        "ext-openssl": "*",
+        "ext-pdo": "*",
+        "ext-pdo_mysql": "*",
+        "endroid/qr-code": "^5.0",
+        "mpdf/mpdf": "^8.2",
+        "phpoffice/phpspreadsheet": "^5.7",
+        "ramsey/uuid": "^4.7",
+        "vlucas/phpdotenv": "^5.6"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^11.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "CityBus\\": "src/"
+        },
+        "files": [
+            "src/helpers.php"
+        ]
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "CityBus\\Tests\\": "tests/"
+        }
+    },
+    "scripts": {
+        "serve": "php -S localhost:8000 -t public",
+        "migrate": "php bin/migrate.php",
+        "seed": "php bin/seed.php",
+        "test": "phpunit"
+    },
+    "config": {
+        "sort-packages": true,
+        "optimize-autoloader": true
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}

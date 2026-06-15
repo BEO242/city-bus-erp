@@ -1,0 +1,16 @@
+{
+  "name": "City Bus — Chauffeur",
+  "short_name": "CB Driver",
+  "description": "Application chauffeur City Bus",
+  "start_url": "/m/driver",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0f172a",
+  "theme_color": "#0f172a",
+  "icons": [
+    { "src": "/assets/img/driver-icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/assets/img/driver-icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ],
+  "scope": "/m/driver",
+  "lang": "fr"
+}

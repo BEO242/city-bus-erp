@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="fr"><head><meta charset="UTF-8"><title>Design C — Operator Cockpit · City Bus</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:Consolas,"SF Mono",Menlo,monospace;background:#0a0a0b;color:#e5e7eb;font-size:13px;line-height:1.5;-webkit-font-smoothing:antialiased}
+.layout{display:flex;height:100vh;overflow:hidden}
+
+.sidebar{width:200px;background:#13141a;border-right:1px solid #252731;display:flex;flex-direction:column;flex-shrink:0}
+.brand{height:48px;border-bottom:1px solid #252731;display:flex;align-items:center;gap:8px;padding:0 12px}
+.brand .logo{width:24px;height:24px;background:#C62828;display:flex;align-items:center;justify-content:center;border-radius:2px;color:#fff;font-weight:700;font-size:11px}
+.brand .name{font-weight:700;letter-spacing:-0.01em;color:#fff;font-size:13px}
+.brand .ver{margin-left:auto;font-size:10px;color:#6e7180}
+.nav{flex:1;overflow-y:auto;padding:8px 0;font-size:12px}
+.nav-section{font-size:9px;text-transform:uppercase;letter-spacing:0.15em;color:#6e7180;padding:6px 12px;font-weight:600}
+.nav a{display:flex;align-items:center;gap:8px;padding:6px 10px;color:#e5e7eb;text-decoration:none;border-left:2px solid transparent;font-family:Consolas,monospace}
+.nav a:hover{background:#1c1d24}
+.nav a.active{background:rgba(198,40,40,0.1);color:#F9A825;border-left-color:#C62828}
+.nav a .ic{width:14px;height:14px;flex-shrink:0;stroke:currentColor;fill:none;stroke-width:2}
+.nav a .badge{margin-left:auto;font-size:10px;background:#252731;padding:0 6px;border-radius:2px}
+.nav a.has-alert .badge{background:#F9A825;color:#0a0a0b;font-weight:700}
+.user-bar{border-top:1px solid #252731;padding:8px;display:flex;align-items:center;gap:8px}
+.user-avatar{width:24px;height:24px;border-radius:2px;background:#C62828;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#fff}
+.user-info{font-size:11px;line-height:1.2;flex:1}
+.user-info b{color:#fff;font-weight:600}
+.user-info span{color:#6e7180}
+.dot-pulse{width:6px;height:6px;background:#10b981;border-radius:50%;animation:pulse 1.5s infinite}
+
+.main{flex:1;display:flex;flex-direction:column;overflow:hidden}
+.topbar{height:48px;border-bottom:1px solid #252731;background:#13141a;display:flex;align-items:center;padding:0 16px;gap:12px;font-size:12px}
+.live{display:flex;align-items:center;gap:6px}
+.sep{color:#3a3d4a}
+.muted{color:#6e7180}
+.accent{color:#F9A825}
+.ticker-wrap{flex:1;height:32px;background:#1c1d24;border:1px solid #252731;border-radius:3px;display:flex;align-items:center;overflow:hidden;padding:0 12px}
+.ticker{display:flex;gap:32px;white-space:nowrap;animation:tick 50s linear infinite;font-size:11px}
+.ticker .green{color:#10b981}
+.ticker .amber{color:#f59e0b}
+.ticker .red{color:#ef4444}
+.btn-cmd{padding:4px 10px;background:#1c1d24;border:1px solid #252731;border-radius:3px;color:#e5e7eb;font-size:11px;cursor:pointer;font-family:Consolas,monospace;display:flex;align-items:center;gap:6px}
+.btn-cmd:hover{background:#252731}
+.btn-icon{width:28px;height:28px;background:transparent;border:none;cursor:pointer;color:#e5e7eb;border-radius:3px;display:flex;align-items:center;justify-content:center}
+.btn-icon:hover{background:#1c1d24}
+
+.canvas{flex:1;overflow:auto;padding:8px;display:grid;grid-template-columns:repeat(12,1fr);gap:8px;align-content:start}
+.panel{background:#13141a;border:1px solid #252731;border-radius:3px}
+.panel-head{padding:8px 12px;border-bottom:1px solid #252731;display:flex;justify-content:space-between;align-items:center}
+.panel-head h3{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:#fff;display:flex;align-items:center;gap:6px}
+.panel-head h3 svg{stroke:#F9A825;width:12px;height:12px;fill:none;stroke-width:2}
+
+.kpis{grid-column:span 12;display:grid;grid-template-columns:repeat(6,1fr);gap:8px}
+.kpi{background:#13141a;border:1px solid #252731;border-radius:3px;padding:10px 12px;border-left:3px solid #C62828;position:relative}
+.kpi.amber{border-left-color:#F9A825}
+.kpi-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px}
+.kpi-label{font-size:10px;text-transform:uppercase;letter-spacing:0.1em;color:#6e7180;font-weight:600}
+.kpi-delta{font-size:10px;font-weight:700}
+.delta-up{color:#10b981}
+.delta-dn{color:#f59e0b}
+.kpi-val{font-size:18px;font-weight:700;font-family:Consolas,monospace;letter-spacing:-0.02em}
+.kpi-val .u{color:#6e7180;font-size:11px;margin-left:3px}
+
+table{width:100%;border-collapse:collapse;font-size:12px;font-family:Consolas,monospace}
+table th{background:#1c1d24;color:#9ca3af;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;padding:6px 8px;border-bottom:1px solid #3a3d4a;text-align:left}
+table td{padding:5px 8px;border-bottom:1px solid #1c1d24}
+table tr:hover td{background:#1c1d24}
+.r{text-align:right}.c{text-align:center}
+.green{color:#10b981}.amber{color:#f59e0b}.red{color:#ef4444}.dim{color:#6e7180}
+.fbar{display:inline-block;width:8px;text-align:center;font-size:10px}
+
+.tabs{display:flex;gap:4px}
+.tab{padding:3px 8px;background:#1c1d24;border-radius:2px;font-size:10px;cursor:pointer;font-weight:700}
+.tab:hover{background:#252731}
+.tab.active{background:#C62828;color:#fff}
+
+.alert-row{padding:10px 12px;border-bottom:1px solid #1c1d24;display:flex;gap:8px;cursor:pointer}
+.alert-row:hover{background:#1c1d24}
+.alert-tag{font-size:10px;font-weight:700;flex-shrink:0;margin-top:2px}
+.alert-content{flex:1}
+.alert-msg{font-size:12px;color:#e5e7eb;margin-bottom:2px}
+.alert-meta{font-size:10px;color:#6e7180;font-family:Consolas,monospace}
+.alert-ack{font-size:10px;color:#6e7180;background:transparent;border:none;cursor:pointer;font-family:Consolas,monospace;font-weight:700}
+.alert-ack:hover{color:#F9A825}
+
+.cargo-row{display:flex;align-items:center;gap:8px;font-size:11px;margin-bottom:6px;font-family:Consolas,monospace}
+.cargo-label{width:60px;color:#6e7180}
+.cargo-bar{flex:1;background:#1c1d24;border-radius:2px;height:8px;overflow:hidden}
+.cargo-bar span{display:block;height:100%}
+.cargo-num{width:32px;text-align:right;font-weight:700}
+
+.fleet-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:3px;padding:12px}
+.bus-cell{aspect-ratio:1;border-radius:2px;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;color:#fff;font-family:Consolas,monospace}
+.bus-active{background:#10b981cc}
+.bus-maint{background:#f59e0bcc}
+.bus-incident{background:#C62828}
+.bus-off{background:#252731;color:#6e7180}
+.fleet-legend{padding:0 12px 12px;display:grid;grid-template-columns:repeat(3,1fr);gap:8px;font-size:10px;font-family:Consolas,monospace}
+
+.cash-row{display:flex;justify-content:space-between;font-size:12px;font-family:Consolas,monospace;padding:4px 0}
+.cash-total{border-top:1px solid #3a3d4a;margin-top:8px;padding-top:8px;font-size:14px;font-weight:700;text-transform:uppercase}
+
+.statusbar{height:24px;background:#13141a;border-top:1px solid #252731;display:flex;align-items:center;padding:0 12px;font-size:10px;color:#6e7180;gap:16px;font-family:Consolas,monospace}
+
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}
+@keyframes tick{0%{transform:translateX(0)}100%{transform:translateX(-50%)}}
+
+::-webkit-scrollbar{width:6px;height:6px}
+::-webkit-scrollbar-track{background:#0a0a0b}
+::-webkit-scrollbar-thumb{background:#3a3d4a;border-radius:3px}
+</style></head><body>
+<div class="layout">
+
+<aside class="sidebar">
+  <div class="brand">
+    <div class="logo">CB</div>
+    <div class="name">CITYBUS</div>
+    <div class="ver">v2.0</div>
+  </div>
+  <nav class="nav">
+    <div class="nav-section">PILOTAGE</div>
+    <a class="active"><svg class="ic" viewBox="0 0 24 24"><polyline points="4 17 10 11 14 15 20 9"/><circle cx="20" cy="9" r="2"/></svg>Dashboard</a>
+    <a><svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/></svg>Tour de contrôle</a>
+    <a><svg class="ic" viewBox="0 0 24 24"><line x1="12" y1="20" x2="12" y2="10"/><line x1="18" y1="20" x2="18" y2="4"/></svg>Reporting</a>
+
+    <div class="nav-section">OPS</div>
+    <a><svg class="ic" viewBox="0 0 24 24"><circle cx="6" cy="19" r="3"/><circle cx="18" cy="5" r="3"/></svg>Voyages<span class="badge">14</span></a>
+    <a><svg class="ic" viewBox="0 0 24 24"><path d="M2 9a3 3 0 0 1 0 6v2a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-2a3 3 0 0 1 0-6V7a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2z"/></svg>Billetterie</a>
+    <a class="has-alert"><svg class="ic" viewBox="0 0 24 24"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8"/></svg>Cargo<span class="badge">3</span></a>
+    <a><svg class="ic" viewBox="0 0 24 24"><rect x="3" y="3" width="5" height="5"/><rect x="16" y="3" width="5" height="5"/></svg>Contrôle</a>
+
+    <div class="nav-section">GESTION</div>
+    <a><svg class="ic" viewBox="0 0 24 24"><circle cx="9" cy="7" r="4"/></svg>RH</a>
+    <a><svg class="ic" viewBox="0 0 24 24"><rect x="2" y="6" width="20" height="12" rx="2"/></svg>Finance</a>
+    <a><svg class="ic" viewBox="0 0 24 24"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77"/></svg>Flotte</a>
+
+    <div class="nav-section">ADMIN</div>
+    <a><svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0"/></svg>Paramètres</a>
+    <a><svg class="ic" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>Audit</a>
+  </nav>
+  <div class="user-bar">
+    <div class="user-avatar">AD</div>
+    <div class="user-info"><b>Admin</b><br><span>DIR · BZV</span></div>
+    <div class="dot-pulse"></div>
+  </div>
+</aside>
+
+<main class="main">
+  <header class="topbar">
+    <div class="live"><span class="dot-pulse"></span><span style="color:#fff">LIVE</span></div>
+    <span class="sep">|</span>
+    <span class="muted">UPDATED <span style="color:#fff" id="now">14:32:18</span></span>
+    <span class="sep">|</span>
+    <span class="accent">12 MAY 2026</span>
+
+    <div class="ticker-wrap">
+      <div class="ticker">
+        <span><span class="green">▲</span> CB-0600 BZV→PNR <span class="green">+416K</span> · 87% remplissage</span>
+        <span><span class="amber">●</span> CB-0800 BZV→DLS retard <span class="amber">+12min</span></span>
+        <span><span class="green">▲</span> Cargo PCL-202605-001247 arrivé Pointe-Noire</span>
+        <span><span class="red">▼</span> Bus B-014 assurance expire dans 3j</span>
+        <span><span class="green">▲</span> CB-0600 BZV→PNR <span class="green">+416K</span> · 87% remplissage</span>
+        <span><span class="amber">●</span> CB-0800 BZV→DLS retard <span class="amber">+12min</span></span>
+      </div>
+    </div>
+
+    <button class="btn-cmd"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>SEARCH<span class="muted">⌘K</span></button>
+    <button class="btn-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/></svg></button>
+  </header>
+
+  <div class="canvas">
+
+    <!-- KPIs -->
+    <div class="kpis">
+      <div class="kpi">
+        <div class="kpi-head"><span class="kpi-label">RECETTES JOUR</span><span class="kpi-delta delta-up">+12.4%</span></div>
+        <div class="kpi-val">2,145,000<span class="u">XAF</span></div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-head"><span class="kpi-label">TICKETS</span><span class="kpi-delta delta-up">+8</span></div>
+        <div class="kpi-val">347<span class="u">/412</span></div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-head"><span class="kpi-label">VOYAGES ACTIFS</span><span class="dot-pulse"></span></div>
+        <div class="kpi-val">14</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-head"><span class="kpi-label">OTP DEP</span><span class="kpi-delta delta-dn">-3.2%</span></div>
+        <div class="kpi-val">87.3<span class="u">%</span></div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-head"><span class="kpi-label">LOAD FACTOR</span></div>
+        <div class="kpi-val green">84.2<span class="u">%</span></div>
+      </div>
+      <div class="kpi amber">
+        <div class="kpi-head"><span class="kpi-label">ALERTES</span><span class="kpi-delta amber">3</span></div>
+        <div class="kpi-val">3</div>
+      </div>
+    </div>
+
+    <!-- Trips table -->
+    <div class="panel" style="grid-column:span 8">
+      <div class="panel-head">
+        <h3><svg viewBox="0 0 24 24"><circle cx="6" cy="19" r="3"/><circle cx="18" cy="5" r="3"/></svg>VOYAGES EN COURS</h3>
+        <div class="tabs">
+          <span class="tab active">TOUS</span>
+          <span class="tab">EN ROUTE</span>
+          <span class="tab">RETARD</span>
+          <span class="tab">INCIDENT</span>
+        </div>
+      </div>
+      <table>
+        <thead><tr>
+          <th>CODE</th><th>LIGNE</th><th>BUS</th><th class="c">DEP</th><th class="c">STATUS</th>
+          <th class="r">DELAY</th><th class="r">PAX</th><th class="r">FILL</th><th class="r">REVENUE</th><th class="c">GPS</th>
+        </tr></thead>
+        <tbody>
+          <tr><td><b>CB-0600</b></td><td>BZV→PNR</td><td>B-014</td><td class="c">06:00</td><td class="c"><span class="green">█</span> EN_ROUTE</td><td class="r green">+0</td><td class="r">52/60</td><td class="r green">87%</td><td class="r"><b>416,000</b></td><td class="c green">●</td></tr>
+          <tr><td><b>CB-0800</b></td><td>BZV→DLS</td><td>B-022</td><td class="c">08:00</td><td class="c"><span class="amber">█</span> EMBARQ</td><td class="r amber">+12</td><td class="r">38/60</td><td class="r amber">63%</td><td class="r"><b>228,000</b></td><td class="c green">●</td></tr>
+          <tr><td><b>CB-1000</b></td><td>PNR→BZV</td><td>B-008</td><td class="c">10:00</td><td class="c"><span class="dim">█</span> PLANIFIE</td><td class="r dim">—</td><td class="r">12/60</td><td class="r dim">20%</td><td class="r"><b>96,000</b></td><td class="c dim">○</td></tr>
+          <tr><td><b>CB-1200</b></td><td>BZV→OWA</td><td>B-031</td><td class="c">12:00</td><td class="c"><span class="red">█</span> INCIDENT</td><td class="r red">+45</td><td class="r">28/60</td><td class="r">47%</td><td class="r"><b>252,000</b></td><td class="c amber">●</td></tr>
+          <tr><td><b>CB-1400</b></td><td>BZV→OWA</td><td>B-019</td><td class="c">14:00</td><td class="c"><span class="dim">█</span> PLANIFIE</td><td class="r dim">—</td><td class="r">28/60</td><td class="r dim">47%</td><td class="r"><b>252,000</b></td><td class="c dim">○</td></tr>
+          <tr><td><b>CB-1600</b></td><td>PNR→BZV</td><td>B-017</td><td class="c">16:00</td><td class="c"><span class="dim">█</span> PLANIFIE</td><td class="r dim">—</td><td class="r">22/60</td><td class="r dim">37%</td><td class="r"><b>198,000</b></td><td class="c dim">○</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Alerts -->
+    <div class="panel" style="grid-column:span 4">
+      <div class="panel-head">
+        <h3><svg viewBox="0 0 24 24"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></svg>ALERTES</h3>
+        <span class="amber" style="font-size:10px;font-weight:700">3 ACTIVE</span>
+      </div>
+      <div class="alert-row">
+        <span class="alert-tag red">[CRIT]</span>
+        <div class="alert-content">
+          <div class="alert-msg">Voyage CB-1200 incident grave</div>
+          <div class="alert-meta">14:25 · BUS B-031 · KM 87</div>
+        </div>
+        <button class="alert-ack">ACK</button>
+      </div>
+      <div class="alert-row">
+        <span class="alert-tag amber">[WARN]</span>
+        <div class="alert-content">
+          <div class="alert-msg">Bus B-014 assurance expire J+3</div>
+          <div class="alert-meta">12:18 · DOC #INS-2026-014</div>
+        </div>
+        <button class="alert-ack">ACK</button>
+      </div>
+      <div class="alert-row">
+        <span class="alert-tag dim">[INFO]</span>
+        <div class="alert-content">
+          <div class="alert-msg">Caisse BZV en attente clôture</div>
+          <div class="alert-meta">14:17 · CASH-2026-512-03</div>
+        </div>
+        <button class="alert-ack">ACK</button>
+      </div>
+    </div>
+
+    <!-- Cargo pipeline -->
+    <div class="panel" style="grid-column:span 4">
+      <div class="panel-head"><h3>CARGO PIPELINE</h3></div>
+      <div style="padding:12px">
+        <div class="cargo-row"><div class="cargo-label">DEPOT</div><div class="cargo-bar"><span style="width:35%;background:#C62828"></span></div><div class="cargo-num">14</div></div>
+        <div class="cargo-row"><div class="cargo-label">TRANSIT</div><div class="cargo-bar"><span style="width:60%;background:#F9A825"></span></div><div class="cargo-num">23</div></div>
+        <div class="cargo-row"><div class="cargo-label">ARRIVE</div><div class="cargo-bar"><span style="width:25%;background:#10b981"></span></div><div class="cargo-num">9</div></div>
+        <div class="cargo-row"><div class="cargo-label">RETIRE</div><div class="cargo-bar"><span style="width:80%;background:#3a3d4a"></span></div><div class="cargo-num">31</div></div>
+      </div>
+    </div>
+
+    <!-- Fleet -->
+    <div class="panel" style="grid-column:span 4">
+      <div class="panel-head"><h3>FLOTTE STATUS</h3></div>
+      <div class="fleet-grid">
+        <div class="bus-cell bus-active">B01</div><div class="bus-cell bus-active">B02</div>
+        <div class="bus-cell bus-active">B03</div><div class="bus-cell bus-maint">B04</div>
+        <div class="bus-cell bus-active">B05</div><div class="bus-cell bus-incident">B06</div>
+        <div class="bus-cell bus-active">B07</div><div class="bus-cell bus-active">B08</div>
+        <div class="bus-cell bus-off">B09</div><div class="bus-cell bus-active">B10</div>
+        <div class="bus-cell bus-active">B11</div><div class="bus-cell bus-maint">B12</div>
+        <div class="bus-cell bus-active">B13</div><div class="bus-cell bus-incident">B14</div>
+      </div>
+      <div class="fleet-legend">
+        <div><span class="green">●</span> 11 EN SERVICE</div>
+        <div><span class="amber">●</span> 2 MAINT</div>
+        <div><span class="red">●</span> 1 INCIDENT</div>
+      </div>
+    </div>
+
+    <!-- Caisse -->
+    <div class="panel" style="grid-column:span 4">
+      <div class="panel-head"><h3>VENTILATION CAISSE</h3></div>
+      <div style="padding:12px">
+        <div class="cash-row"><span class="dim">ESPECES</span><b>1,245,000</b></div>
+        <div class="cash-row"><span class="dim">MOMO MTN</span><b>580,000</b></div>
+        <div class="cash-row"><span class="dim">MOMO AIRTEL</span><b>220,000</b></div>
+        <div class="cash-row"><span class="dim">CARTE</span><b>100,000</b></div>
+        <div class="cash-row cash-total"><span>TOTAL</span><span class="green">2,145,000</span></div>
+      </div>
+    </div>
+
+  </div>
+
+  <footer class="statusbar">
+    <span><span class="green">●</span> DB OK</span>
+    <span><span class="green">●</span> API OK</span>
+    <span><span class="amber">●</span> SMS GATEWAY: DEGRADED</span>
+    <span><span class="green">●</span> BACKUP 14:00</span>
+    <span style="margin-left:auto">user=admin · agency=BZV-MAIN · ip=192.168.1.42</span>
+  </footer>
+</main>
+
+</div>
+
+<script>
+setInterval(()=>{document.getElementById('now').textContent=new Date().toTimeString().slice(0,8)},1000);
+</script>
+</body></html>

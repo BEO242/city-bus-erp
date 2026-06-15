@@ -1,0 +1,244 @@
+<?php
+
+declare(strict_types=1);
+
+namespace CityBus\Services;
+
+use CityBus\Core\Database;
+use CityBus\Models\AuditLog;
+
+final class TripService
+{
+    public function create(array $data): int
+    {
+        $this->assertNoConflict(
+            (int)$data['bus_id'],
+            (int)$data['driver_id'],
+            (string)$data['trip_date'],
+            (string)$data['departure_scheduled'],
+            $data['arrival_scheduled'] ?? null,
+            null
+        );
+        $code = $this->generateCode($data['line_id'], $data['trip_date']);
+        $id = Database::insert(
+            "INSERT INTO trips (trip_code, line_id, bus_id, driver_id, trip_date,
+                                departure_scheduled, arrival_scheduled,
+                                mileage_start, weather_conditions, notes, status, created_by)
+             VALUES (?,?,?,?,?, ?,?, ?,?,?, 'planifie', ?)",
+            [
+                $code, $data['line_id'], $data['bus_id'],
+                $data['driver_id'],
+                $data['trip_date'], $data['departure_scheduled'],
+                $data['arrival_scheduled'] ?? null,
+                !empty($data['mileage_start']) ? (int)$data['mileage_start'] : null,
+                $data['weather_conditions'] ?? null,
+                $data['notes'] ?? null,
+                \CityBus\Core\Auth::id(),
+            ]
+        );
+        AuditLog::record('trip.create', 'trip', $id, ['code' => $code]);
+        return $id;
+    }
+
+    /**
+     * Transitions de statut autorisées (machine à états).
+     * Référence : planifie → embarquement → en_route → arrive → cloture
+     * Annulation possible depuis planifie/embarquement uniquement.
+     */
+    private const ALLOWED_TRANSITIONS = [
+        'planifie'     => ['embarquement', 'incident', 'annule'],
+        'embarquement' => ['en_route', 'planifie', 'incident', 'annule'],
+        'en_route'     => ['arrive', 'incident'],
+        'arrive'       => ['cloture'],
+        'cloture'      => [],
+        'annule'       => [],
+        'incident'     => ['planifie', 'embarquement', 'en_route', 'arrive', 'annule'],
+    ];
+
+    public function changeStatus(int $tripId, string $status): bool
+    {
+        return Database::transaction(function () use ($tripId, $status) {
+            $current = Database::selectOne("SELECT status FROM trips WHERE id=? FOR UPDATE", [$tripId]);
+            if (!$current) {
+                throw new \RuntimeException('Voyage introuvable.');
+            }
+            $from = $current['status'];
+            if ($from === $status) {
+                return true; // idempotent
+            }
+            $allowed = self::ALLOWED_TRANSITIONS[$from] ?? [];
+            if (!in_array($status, $allowed, true)) {
+                throw new \RuntimeException(
+                    "Transition de statut interdite : {$from} → {$status}."
+                );
+            }
+
+            Database::execute("UPDATE trips SET status=? WHERE id=?", [$status, $tripId]);
+            AuditLog::record('trip.status', 'trip', $tripId, ['from' => $from, 'to' => $status]);
+
+            // Webhook sortant — événements clés du cycle de vie
+            $eventMap = [
+                'en_route'     => 'trip.departure',
+                'arrive'       => 'trip.arrived',
+                'incident'     => 'trip.incident',
+                'annule'       => 'trip.cancelled',
+            ];
+            if (isset($eventMap[$status])) {
+                \CityBus\Services\WebhookService::dispatch($eventMap[$status], [
+                    'trip_id' => $tripId,
+                    'from'    => $from,
+                    'to'      => $status,
+                ]);
+            }
+
+            // SMS aux passagers en cas de départ ou de retard/incident (opt-in via paramètres)
+            if ($status === 'en_route' && \CityBus\Core\Setting::getBool('sms.notify_trip_departure', false)) {
+                $this->notifyPassengersBySms($tripId, 'CITY BUS : votre voyage vient de partir. Bon trajet.');
+            } elseif ($status === 'incident' && \CityBus\Core\Setting::getBool('sms.notify_trip_delay', false)) {
+                $this->notifyPassengersBySms($tripId, 'CITY BUS : un incident affecte votre voyage. Plus d’info à l’agence.');
+            }
+
+            // Notification admin sur incident (paramétrable)
+            if ($status === 'incident'
+                && \CityBus\Core\Setting::getBool('voyage.incident_notify_admin', true)) {
+                AuditLog::record('trip.incident.notify', 'trip', $tripId, [
+                    'from' => $from,
+                    'severity' => 'high',
+                ]);
+            }
+
+            // Synchroniser le bus
+            if (in_array($status, ['en_route','embarquement'], true)) {
+                Database::execute("UPDATE buses SET status='en_voyage' WHERE id=(SELECT bus_id FROM trips WHERE id=?)", [$tripId]);
+            } elseif (in_array($status, ['arrive','cloture','annule'], true)) {
+                Database::execute("UPDATE buses SET status='disponible' WHERE id=(SELECT bus_id FROM trips WHERE id=?)", [$tripId]);
+            }
+
+            // Annulation voyage : annuler en cascade tous les billets encore émis
+            if ($status === 'annule') {
+                $cancelled = Database::execute(
+                    "UPDATE tickets
+                        SET status='annule',
+                            cancelled_at=NOW(),
+                            cancel_reason=CONCAT('Voyage annulé (#', ?, ')')
+                      WHERE trip_id=? AND status='emis' AND deleted_at IS NULL",
+                    [$tripId, $tripId]
+                );
+                Database::execute(
+                    "UPDATE baggage_tickets
+                        SET status='annule',
+                            cancelled_at=NOW(),
+                            cancel_reason=CONCAT('Voyage annulé (#', ?, ')')
+                      WHERE trip_id=? AND status='emis' AND deleted_at IS NULL",
+                    [$tripId, $tripId]
+                );
+                AuditLog::record('trip.cancel.cascade', 'trip', $tripId, ['tickets_cancelled' => $cancelled]);
+            }
+
+            return true;
+        });
+    }
+
+    private function generateCode(int $lineId, string $date): string
+    {
+        $line = Database::selectOne("SELECT code FROM bus_lines WHERE id=?", [$lineId]);
+        $prefix = ($line['code'] ?? 'L000') . '-' . date('Ymd', strtotime($date));
+        $row = Database::selectOne("SELECT trip_code FROM trips WHERE trip_code LIKE ? ORDER BY id DESC LIMIT 1", ["$prefix-%"]);
+        $next = $row ? ((int)substr($row['trip_code'], -2)) + 1 : 1;
+        return sprintf('%s-%02d', $prefix, $next);
+    }
+
+    public function bookedSeats(int $tripId): array
+    {
+        $rows = Database::select(
+            "SELECT seat_number FROM tickets
+             WHERE trip_id=? AND seat_number IS NOT NULL
+               AND status IN ('emis','valide','arrive') AND deleted_at IS NULL",
+            [$tripId]
+        );
+        return array_map(fn($r) => (int)$r['seat_number'], $rows);
+    }
+
+    /**
+     * Variante publique de assertNoConflict pour la mise à jour d'un voyage existant.
+     */
+    public function assertNoConflictPublic(
+        int $busId,
+        int $driverId,
+        string $tripDate,
+        string $departureScheduled,
+        ?string $arrivalScheduled,
+        ?int $excludeTripId
+    ): void {
+        $this->assertNoConflict($busId, $driverId, $tripDate, $departureScheduled, $arrivalScheduled, $excludeTripId);
+    }
+
+    /**
+     * Vérifie qu'aucun voyage actif (non annulé) n'utilise déjà le bus ou le chauffeur
+     * sur un créneau qui chevauche [departure_scheduled .. arrival_scheduled] à la date donnée.
+     * Si l'arrivée n'est pas fournie, on considère un créneau de sécurité de 2 heures.
+     */
+    private function assertNoConflict(
+        int $busId,
+        int $driverId,
+        string $tripDate,
+        string $departureScheduled,
+        ?string $arrivalScheduled,
+        ?int $excludeTripId
+    ): void {
+        $start = $tripDate . ' ' . $departureScheduled;
+        if ($arrivalScheduled !== null && $arrivalScheduled !== '') {
+            // arrival_scheduled est stocké en TIME → on l'attache à la même date par défaut
+            $end = $tripDate . ' ' . $arrivalScheduled;
+            // si l'arrivée est avant le départ, considérer le lendemain
+            if (strtotime($end) <= strtotime($start)) {
+                $end = date('Y-m-d H:i:s', strtotime($start) + 7200);
+            }
+        } else {
+            $end = date('Y-m-d H:i:s', strtotime($start) + 7200);
+        }
+
+        $params = [$busId, $driverId, $end, $start];
+        $sql = "SELECT id, trip_code, bus_id, driver_id, departure_scheduled, arrival_scheduled, trip_date
+                  FROM trips
+                 WHERE status NOT IN ('annule','cloture')
+                   AND (bus_id = ? OR driver_id = ?)
+                   AND CONCAT(trip_date,' ',departure_scheduled) < ?
+                   AND COALESCE(
+                         CONCAT(trip_date,' ',arrival_scheduled),
+                         DATE_ADD(CONCAT(trip_date,' ',departure_scheduled), INTERVAL 2 HOUR)
+                       ) > ?";
+        if ($excludeTripId !== null) {
+            $sql .= " AND id <> ?";
+            $params[] = $excludeTripId;
+        }
+        $rows = Database::select($sql, $params);
+
+        foreach ($rows as $r) {
+            if ((int)$r['bus_id'] === $busId) {
+                throw new \RuntimeException(
+                    "Conflit : le bus est déjà affecté au voyage {$r['trip_code']} ({$r['trip_date']} {$r['departure_scheduled']})."
+                );
+            }
+            if ((int)$r['driver_id'] === $driverId) {
+                throw new \RuntimeException(
+                    "Conflit : le chauffeur est déjà affecté au voyage {$r['trip_code']} ({$r['trip_date']} {$r['departure_scheduled']})."
+                );
+            }
+        }
+    }
+
+    /** Envoie un SMS à tous les passagers d'un voyage ayant un téléphone valide. */
+    private function notifyPassengersBySms(int $tripId, string $message): void
+    {
+        $rows = Database::select(
+            "SELECT DISTINCT passenger_phone FROM tickets
+              WHERE trip_id = ? AND status = 'emis' AND deleted_at IS NULL
+                AND passenger_phone IS NOT NULL AND passenger_phone <> ''",
+            [$tripId]
+        );
+        foreach ($rows as $r) {
+            \CityBus\Services\SmsService::send((string)$r['passenger_phone'], $message);
+        }
+    }
+}

@@ -1,0 +1,320 @@
+{
+    "findings": [
+        {
+            "severity": "P1",
+            "scenario": "referentiel.buses",
+            "issue": "Plaque dupliquée acceptée silencieusement",
+            "expected": "Erreur unicité",
+            "actual": "HTTP 302"
+        },
+        {
+            "severity": "P2",
+            "scenario": "caisse",
+            "issue": "Bouton ouverture session non trouvé en page index",
+            "expected": "lien \/caisse\/open visible",
+            "actual": "absent"
+        },
+        {
+            "severity": "P2",
+            "scenario": "modules",
+            "issue": "Module \/admin introuvable",
+            "expected": "200\/302",
+            "actual": "404"
+        },
+        {
+            "severity": "P2",
+            "scenario": "modules",
+            "issue": "Module \/admin\/audit-logs introuvable",
+            "expected": "200\/302",
+            "actual": "404"
+        },
+        {
+            "severity": "P2",
+            "scenario": "modules",
+            "issue": "Module \/users introuvable",
+            "expected": "200\/302",
+            "actual": "404"
+        }
+    ],
+    "results": [
+        {
+            "scenario": "auth",
+            "action": "login admin",
+            "status": 200,
+            "detail": "OK"
+        },
+        {
+            "scenario": "referentiel.agencies",
+            "action": "create PN-Centre Test",
+            "status": 302,
+            "detail": "http:\/\/localhost:8000\/referentiel\/agencies"
+        },
+        {
+            "scenario": "referentiel.agencies",
+            "action": "create PN-Loandjili Test",
+            "status": 302,
+            "detail": "http:\/\/localhost:8000\/referentiel\/agencies"
+        },
+        {
+            "scenario": "referentiel.agencies",
+            "action": "create BZV-Centre Test",
+            "status": 302,
+            "detail": "http:\/\/localhost:8000\/referentiel\/agencies"
+        },
+        {
+            "scenario": "referentiel.agencies",
+            "action": "create BZV-Bacongo Test",
+            "status": 302,
+            "detail": "http:\/\/localhost:8000\/referentiel\/agencies"
+        },
+        {
+            "scenario": "referentiel.agencies",
+            "action": "create Dolisie-Test",
+            "status": 302,
+            "detail": "http:\/\/localhost:8000\/referentiel\/agencies"
+        },
+        {
+            "scenario": "referentiel.lines",
+            "action": "create TEST-PN-BZV",
+            "status": 302,
+            "detail": "http:\/\/localhost:8000\/referentiel\/lines\/3"
+        },
+        {
+            "scenario": "referentiel.lines",
+            "action": "create TEST-BZV-PN",
+            "status": 302,
+            "detail": "http:\/\/localhost:8000\/referentiel\/lines\/4"
+        },
+        {
+            "scenario": "referentiel.lines",
+            "action": "create TEST-PN-DOL",
+            "status": 302,
+            "detail": "http:\/\/localhost:8000\/referentiel\/lines\/5"
+        },
+        {
+            "scenario": "referentiel.buses",
+            "action": "create TEST-B001\/CG-001-TEST",
+            "status": 302,
+            "detail": "http:\/\/localhost:8000\/"
+        },
+        {
+            "scenario": "referentiel.buses",
+            "action": "create TEST-B002\/CG-002-TEST",
+            "status": 302,
+            "detail": "http:\/\/localhost:8000\/"
+        },
+        {
+            "scenario": "referentiel.buses",
+            "action": "create TEST-B003\/CG-001-TEST",
+            "status": 302,
+            "detail": "http:\/\/localhost:8000\/"
+        },
+        {
+            "scenario": "referentiel.drivers",
+            "action": "create TEST-D001",
+            "status": 302,
+            "detail": "http:\/\/localhost:8000\/"
+        },
+        {
+            "scenario": "referentiel.drivers",
+            "action": "create TEST-D002",
+            "status": 302,
+            "detail": "http:\/\/localhost:8000\/"
+        },
+        {
+            "scenario": "rh.employees",
+            "action": "create TEST-E001",
+            "status": 302,
+            "detail": "http:\/\/localhost:8000\/"
+        },
+        {
+            "scenario": "rh.employees",
+            "action": "create TEST-E002",
+            "status": 302,
+            "detail": "http:\/\/localhost:8000\/"
+        },
+        {
+            "scenario": "referentiel.tariffs",
+            "action": "create passager\/standard",
+            "status": 302,
+            "detail": "http:\/\/localhost:8000\/"
+        },
+        {
+            "scenario": "referentiel.tariffs",
+            "action": "create passager\/vip",
+            "status": 302,
+            "detail": "http:\/\/localhost:8000\/"
+        },
+        {
+            "scenario": "referentiel.tariffs",
+            "action": "create arret_route\/standard",
+            "status": 302,
+            "detail": "http:\/\/localhost:8000\/"
+        },
+        {
+            "scenario": "voyages",
+            "action": "create date=2026-05-05",
+            "status": 302,
+            "detail": "http:\/\/localhost:8000\/voyages\/10"
+        },
+        {
+            "scenario": "voyages",
+            "action": "create date=2026-05-06",
+            "status": 302,
+            "detail": "http:\/\/localhost:8000\/voyages\/11"
+        },
+        {
+            "scenario": "voyages",
+            "action": "create date=2026-05-07",
+            "status": 302,
+            "detail": "http:\/\/localhost:8000\/voyages\/12"
+        },
+        {
+            "scenario": "billetterie",
+            "action": "load page",
+            "status": 200,
+            "detail": ""
+        },
+        {
+            "scenario": "billetterie.sell",
+            "action": "sell trip=10",
+            "status": 302,
+            "detail": "http:\/\/localhost:8000\/"
+        },
+        {
+            "scenario": "reporting",
+            "action": "\/reporting",
+            "status": 200,
+            "detail": "len=41203"
+        },
+        {
+            "scenario": "reporting",
+            "action": "\/reporting\/sales\/csv",
+            "status": 200,
+            "detail": "len=90"
+        },
+        {
+            "scenario": "reporting",
+            "action": "\/reporting\/sales\/xlsx",
+            "status": 200,
+            "detail": "len=6382"
+        },
+        {
+            "scenario": "media.upload",
+            "action": "mediable_type non whitelisté",
+            "status": 403,
+            "detail": "{\"error\":\"Type de ressource non autoris\\\\u00e9.\"}"
+        },
+        {
+            "scenario": "show.views",
+            "action": "\/referentiel\/lines\/1",
+            "status": 200,
+            "detail": "len=69832"
+        },
+        {
+            "scenario": "show.views",
+            "action": "\/referentiel\/buses\/1",
+            "status": 200,
+            "detail": "len=46808"
+        },
+        {
+            "scenario": "show.views",
+            "action": "\/referentiel\/drivers\/3",
+            "status": 200,
+            "detail": "len=48992"
+        },
+        {
+            "scenario": "show.views",
+            "action": "\/rh\/employees\/1",
+            "status": 200,
+            "detail": "len=36736"
+        },
+        {
+            "scenario": "modules",
+            "action": "\/admin",
+            "status": 404,
+            "detail": "len=1862"
+        },
+        {
+            "scenario": "modules",
+            "action": "\/admin\/users",
+            "status": 200,
+            "detail": "len=69395"
+        },
+        {
+            "scenario": "modules",
+            "action": "\/admin\/roles",
+            "status": 200,
+            "detail": "len=48918"
+        },
+        {
+            "scenario": "modules",
+            "action": "\/admin\/audit-logs",
+            "status": 404,
+            "detail": "len=1862"
+        },
+        {
+            "scenario": "modules",
+            "action": "\/profile",
+            "status": 200,
+            "detail": "len=40347"
+        },
+        {
+            "scenario": "modules",
+            "action": "\/users",
+            "status": 404,
+            "detail": "len=1862"
+        },
+        {
+            "scenario": "modules",
+            "action": "\/billetterie-bagages",
+            "status": 200,
+            "detail": "len=39360"
+        }
+    ],
+    "created_ids": {
+        "agencies": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            16,
+            17,
+            18,
+            19,
+            20
+        ],
+        "lines": [
+            1,
+            2,
+            4,
+            3,
+            5
+        ],
+        "buses": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            7,
+            8
+        ],
+        "drivers": [
+            3,
+            4
+        ],
+        "trips": [
+            10,
+            11,
+            12
+        ]
+    }
+}

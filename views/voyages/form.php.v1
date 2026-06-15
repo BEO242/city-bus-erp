@@ -1,0 +1,533 @@
+<?php
+/** @var \CityBus\Core\View $view */
+$view->extends('layouts/app');
+
+$_errors = errors();
+$_old    = fn(string $f, mixed $d = '') => old($f, $d);
+$isEdit  = !empty($trip);
+$action  = $isEdit ? url('voyages/'.$trip['id'].'/update') : url('voyages');
+$dateVal = fn($v) => ($v && $v !== '0000-00-00') ? $v : '';
+
+// Grouper arrêts par ligne pour injection JS
+$_stopsByLine = [];
+foreach ($stops as $s) {
+    $_stopsByLine[(int)$s['line_id']][] = ['id'=>(int)$s['id'],'name'=>$s['name'],'km_from_origin'=>$s['km_from_origin'],'order_position'=>(int)$s['order_position']];
+}
+
+// Préparer l'équipage existant pour Alpine
+$_crewInit = [];
+foreach ($crew as $c) {
+    $_crewInit[] = [
+        'employee_id' => (int)$c['emp_id'],
+        'role'        => $c['role'],
+        'notes'       => $c['crew_note'] ?? '',
+    ];
+}
+
+// Préparer notes internes (JSON ou texte plain pour rétro-compat)
+$_decodeList = function(?string $v): array {
+    if (!$v) return [];
+    $d = json_decode($v, true);
+    return is_array($d) ? array_values(array_filter($d)) : [$v];
+};
+// Sur erreur de validation, old('notes') retourne un tableau directement
+$_notesInit    = is_array($_old('notes'))          ? array_values(array_filter($_old('notes')))
+                                                    : $_decodeList($trip['notes'] ?? null);
+$_incidentInit = $_decodeList($trip['incident_notes'] ?? null);
+
+$_tabWithError = 'trajet';
+if (isset($_errors['driver_id'])) $_tabWithError = 'equipe';
+if (isset($_errors['notes']))     $_tabWithError = 'notes';
+?>
+<?php $view->start('content') ?>
+<div class="space-y-5"
+     x-data="voyageForm()"
+     x-init="init()"
+     x-cloak>
+
+  <!-- ── Fil d'Ariane ────────────────────────────────────────────────── -->
+  <div class="flex items-center gap-2 text-sm text-slate-500">
+    <a href="<?= e(url('voyages')) ?>" class="hover:text-cb-primary transition inline-flex items-center gap-1">
+      <i data-lucide="chevron-left" class="w-4 h-4"></i> Voyages
+    </a>
+    <?php if ($isEdit): ?>
+    <span>/</span>
+    <a href="<?= e(url('voyages/'.$trip['id'])) ?>" class="hover:text-cb-primary transition font-mono"><?= e($trip['trip_code']) ?></a>
+    <?php endif ?>
+    <span>/</span>
+    <span class="text-slate-800 font-medium"><?= e($title) ?></span>
+  </div>
+
+  <!-- ── Carte en-tête ───────────────────────────────────────────────── -->
+  <div class="bg-gradient-to-br from-cb-primary to-cb-dark text-white rounded-2xl p-6 shadow-soft">
+    <div class="flex items-center justify-between gap-4 flex-wrap">
+      <div class="flex items-center gap-4">
+        <span class="w-14 h-14 bg-white/15 rounded-2xl flex items-center justify-center shrink-0">
+          <i data-lucide="bus" class="w-7 h-7"></i>
+        </span>
+        <div>
+          <h1 class="text-2xl font-bold leading-tight"><?= e($title) ?></h1>
+          <p class="text-white/70 text-sm mt-0.5">
+            <?= $isEdit ? 'Modifiez les informations du voyage.' : 'Remplissez les informations pour planifier le départ.' ?>
+          </p>
+        </div>
+      </div>
+      <?php if ($isEdit): ?>
+      <span class="text-xs font-mono bg-white/20 px-3 py-1.5 rounded-full"><?= e($trip['trip_code']) ?></span>
+      <?php endif ?>
+    </div>
+  </div>
+
+  <!-- ── Formulaire ──────────────────────────────────────────────────── -->
+  <form method="post" action="<?= e($action) ?>" data-dirty-watch="<?= $isEdit ? '1' : '0' ?>" novalidate
+        class="bg-white rounded-2xl border border-slate-100 shadow-soft overflow-hidden">
+    <?= csrf_field() ?>
+
+    <!-- Navigation onglets -->
+    <div class="border-b border-slate-100 px-6 pt-4 flex gap-1 overflow-x-auto">
+      <?php
+        $tabs = [
+          'trajet'   => ['label' => 'Itinéraire', 'icon' => 'map'],
+          'equipe'   => ['label' => 'Équipage',   'icon' => 'users'],
+          'horaires' => ['label' => 'Horaires',   'icon' => 'clock'],
+          'notes'    => ['label' => 'Notes',      'icon' => 'file-text'],
+        ];
+      ?>
+      <?php foreach ($tabs as $tk => $tm): ?>
+        <button type="button"
+                @click="tab = '<?= $tk ?>'"
+                :class="tab === '<?= $tk ?>'
+                  ? 'text-cb-primary border-b-2 border-cb-primary font-semibold'
+                  : 'text-slate-500 border-b-2 border-transparent hover:text-slate-800'"
+                class="flex items-center gap-2 px-4 py-3 text-sm whitespace-nowrap transition-colors shrink-0">
+          <i data-lucide="<?= $tm['icon'] ?>" class="w-4 h-4"></i>
+          <?= $tm['label'] ?>
+        </button>
+      <?php endforeach ?>
+    </div>
+
+    <div class="p-6 space-y-6">
+
+      <!-- ═══ Onglet ITINÉRAIRE ════════════════════════════════════════ -->
+      <div x-show="tab === 'trajet'" x-transition>
+        <h2 class="cb-form-section mb-5">
+          <i data-lucide="map" class="w-4 h-4 text-cb-primary"></i> Ligne &amp; bus
+        </h2>
+        <div class="grid sm:grid-cols-2 gap-5">
+
+          <!-- Ligne -->
+          <div class="sm:col-span-2">
+            <label for="line_id" class="cb-label">Ligne <span class="text-red-500">*</span></label>
+            <select id="line_id" name="line_id" class="cb-input w-full"
+                    x-model="selectedLineId" @change="onLineChange()">
+              <option value="">— Choisir une ligne —</option>
+              <?php foreach ($lines as $l): ?>
+                <option value="<?= (int)$l['id'] ?>"
+                        data-dist="<?= e($l['distance_km'] ?? '') ?>"
+                        data-dur="<?= e($l['duration_hours'] ?? '') ?>"
+                        data-dep="<?= e(ucfirst(str_replace('_',' ',$l['departure_city']??''))) ?>"
+                        data-arr="<?= e(ucfirst(str_replace('_',' ',$l['arrival_city']??''))) ?>"
+                  <?= (string)$_old('line_id', $trip['line_id'] ?? '') === (string)$l['id'] ? 'selected' : '' ?>>
+                  <?= e($l['code']) ?> — <?= e($l['name']) ?>
+                </option>
+              <?php endforeach ?>
+            </select>
+            <?php if (isset($_errors['line_id'])): ?><p class="cb-error"><?= e($_errors['line_id']) ?></p><?php endif ?>
+
+            <!-- Infos ligne dynamiques -->
+            <div x-show="lineInfo.code" x-transition
+                 class="mt-3 flex flex-wrap gap-4 bg-cb-bg rounded-xl px-4 py-3 text-sm">
+              <span class="flex items-center gap-1.5 text-slate-600">
+                <i data-lucide="navigation" class="w-3.5 h-3.5 text-cb-primary"></i>
+                <span x-text="lineInfo.dep"></span>
+                <i data-lucide="arrow-right" class="w-3 h-3 text-slate-400"></i>
+                <span x-text="lineInfo.arr"></span>
+              </span>
+              <span class="flex items-center gap-1.5 text-slate-600" x-show="lineInfo.dist">
+                <i data-lucide="route" class="w-3.5 h-3.5 text-cb-primary"></i>
+                <span x-text="lineInfo.dist + ' km'"></span>
+              </span>
+              <span class="flex items-center gap-1.5 text-slate-600" x-show="lineInfo.dur">
+                <i data-lucide="clock" class="w-3.5 h-3.5 text-cb-primary"></i>
+                <span x-text="lineInfo.dur + 'h de trajet'"></span>
+              </span>
+            </div>
+          </div>
+
+          <!-- Bus -->
+          <div>
+            <label for="bus_id" class="cb-label">Bus <span class="text-red-500">*</span></label>
+            <select id="bus_id" name="bus_id" class="cb-input w-full">
+              <option value="">— Choisir un bus —</option>
+              <?php foreach ($buses as $b): ?>
+                <option value="<?= (int)$b['id'] ?>"
+                  <?= (string)$_old('bus_id', $trip['bus_id'] ?? '') === (string)$b['id'] ? 'selected' : '' ?>>
+                  <?= e($b['code']) ?> · <?= e($b['plate']) ?>
+                  <?php if (!empty($b['seats'])): ?>(<?= (int)$b['seats'] ?> pl)<?php endif ?>
+                </option>
+              <?php endforeach ?>
+            </select>
+            <?php if (isset($_errors['bus_id'])): ?><p class="cb-error"><?= e($_errors['bus_id']) ?></p><?php endif ?>
+          </div>
+
+          <!-- Date du voyage -->
+          <div>
+            <label for="trip_date" class="cb-label">Date du voyage <span class="text-red-500">*</span></label>
+            <input type="date" id="trip_date" name="trip_date"
+                   value="<?= e($_old('trip_date', $dateVal($trip['trip_date'] ?? date('Y-m-d')))) ?>"
+                   class="cb-input w-full">
+            <?php if (isset($_errors['trip_date'])): ?><p class="cb-error"><?= e($_errors['trip_date']) ?></p><?php endif ?>
+          </div>
+
+          <!-- Arrêts de la ligne -->
+          <div x-show="lineStops.length > 0" x-transition class="sm:col-span-2">
+            <label class="cb-label">Arrêts de la ligne</label>
+            <div class="flex flex-wrap gap-2 mt-1">
+              <template x-for="(stop, idx) in lineStops" :key="stop.id">
+                <div class="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 text-xs font-medium text-slate-700">
+                  <span class="w-4 h-4 rounded-full bg-cb-primary text-white flex items-center justify-center font-bold text-[10px]"
+                        x-text="idx+1"></span>
+                  <span x-text="stop.name"></span>
+                  <span class="text-slate-400" x-show="stop.km_from_origin > 0" x-text="'(' + stop.km_from_origin + ' km)'"></span>
+                </div>
+              </template>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══ Onglet ÉQUIPAGE ════════════════════════════════════════════ -->
+      <div x-show="tab === 'equipe'" x-transition>
+        <h2 class="cb-form-section mb-5">
+          <i data-lucide="users" class="w-4 h-4 text-cb-primary"></i> Équipage du voyage
+        </h2>
+
+        <!-- Chauffeur principal -->
+        <div class="bg-cb-bg rounded-2xl border border-red-100 p-5 mb-5">
+          <div class="flex items-center gap-2 mb-4">
+            <span class="w-8 h-8 rounded-xl bg-cb-primary text-white flex items-center justify-center shrink-0">
+              <i data-lucide="user" class="w-4 h-4"></i>
+            </span>
+            <div>
+              <h3 class="font-bold text-slate-900 text-sm">Chauffeur principal</h3>
+              <p class="text-xs text-slate-500">Responsable du véhicule — obligatoire</p>
+            </div>
+          </div>
+          <label for="driver_id" class="cb-label">Chauffeur <span class="text-red-500">*</span></label>
+          <select id="driver_id" name="driver_id" class="cb-input w-full">
+            <option value="">— Choisir un chauffeur —</option>
+            <?php foreach ($drivers as $d): ?>
+              <option value="<?= (int)$d['id'] ?>"
+                <?= (string)$_old('driver_id', $trip['driver_id'] ?? '') === (string)$d['id'] ? 'selected' : '' ?>>
+                <?= e($d['last_name'].' '.$d['first_name']) ?> (<?= e($d['matricule']) ?>)
+                <?php if (!empty($d['license_number'])): ?>· Permis <?= e($d['license_number']) ?><?php endif ?>
+              </option>
+            <?php endforeach ?>
+          </select>
+          <?php if (isset($_errors['driver_id'])): ?><p class="cb-error"><?= e($_errors['driver_id']) ?></p><?php endif ?>
+          <?php if (!$drivers): ?>
+            <p class="cb-hint text-amber-600"><i data-lucide="alert-triangle" class="inline w-3 h-3"></i> Aucun chauffeur actif.</p>
+          <?php endif ?>
+        </div>
+
+        <!-- Équipage supplémentaire -->
+        <div class="space-y-3">
+          <div class="flex items-center justify-between">
+            <h3 class="font-semibold text-slate-800 text-sm flex items-center gap-2">
+              <i data-lucide="user-plus" class="w-4 h-4 text-slate-500"></i>
+              Équipage supplémentaire
+              <span class="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full font-normal"
+                    x-text="crew.length + ' membre(s)'"></span>
+            </h3>
+            <button type="button" @click="addCrew()"
+                    class="text-sm font-semibold text-cb-primary hover:text-cb-dark transition inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl hover:bg-cb-bg">
+              <i data-lucide="plus" class="w-4 h-4"></i> Ajouter
+            </button>
+          </div>
+
+          <template x-for="(member, idx) in crew" :key="idx">
+            <div class="border border-slate-200 rounded-2xl p-4 space-y-3 relative">
+              <button type="button" @click="removeCrew(idx)"
+                      class="absolute top-3 right-3 w-7 h-7 flex items-center justify-center rounded-lg text-slate-400 hover:bg-rose-50 hover:text-rose-500 transition">
+                <i data-lucide="x" class="w-4 h-4"></i>
+              </button>
+              <div class="grid sm:grid-cols-3 gap-3">
+                <div class="sm:col-span-2">
+                  <label class="cb-label text-xs">Employé</label>
+                  <select :name="'crew_employee_id[' + idx + ']'" x-model="member.employee_id" class="cb-input w-full text-sm">
+                    <option value="">— Choisir —</option>
+                    <?php foreach ($staff as $s): ?>
+                    <option value="<?= (int)$s['id'] ?>">
+                      <?= e($s['last_name'].' '.$s['first_name']) ?> (<?= e($s['matricule']) ?>) · <?= e(str_replace('_',' ',$s['position'])) ?>
+                    </option>
+                    <?php endforeach ?>
+                  </select>
+                </div>
+                <div>
+                  <label class="cb-label text-xs">Rôle dans ce voyage</label>
+                  <select :name="'crew_role[' + idx + ']'" x-model="member.role" class="cb-input w-full text-sm">
+                    <option value="convoyeur">Convoyeur</option>
+                    <option value="caissier">Caissier embarqué</option>
+                    <option value="controleur">Contrôleur</option>
+                    <option value="guide">Guide</option>
+                    <option value="chauffeur">Chauffeur (relève)</option>
+                    <option value="autre">Autre</option>
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label class="cb-label text-xs">Note (optionnel)</label>
+                <input type="text" :name="'crew_notes[' + idx + ']'" x-model="member.notes"
+                       placeholder="Ex: assure la billetterie arrière…"
+                       class="cb-input w-full text-sm">
+              </div>
+            </div>
+          </template>
+
+          <div x-show="crew.length === 0"
+               class="border-2 border-dashed border-slate-200 rounded-2xl p-8 text-center text-slate-400">
+            <i data-lucide="user-plus" class="w-8 h-8 mx-auto mb-2 text-slate-300"></i>
+            <p class="text-sm">Aucun membre d'équipage supplémentaire.</p>
+            <button type="button" @click="addCrew()"
+                    class="mt-2 text-sm text-cb-primary font-semibold hover:text-cb-dark transition">
+              + Ajouter un membre
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══ Onglet HORAIRES ════════════════════════════════════════════ -->
+      <div x-show="tab === 'horaires'" x-transition>
+        <h2 class="cb-form-section mb-5">
+          <i data-lucide="clock" class="w-4 h-4 text-cb-primary"></i> Horaires &amp; kilométrage
+        </h2>
+        <div class="grid sm:grid-cols-2 gap-5">
+          <div>
+            <label for="departure_scheduled" class="cb-label">Départ prévu <span class="text-red-500">*</span></label>
+            <input type="time" id="departure_scheduled" name="departure_scheduled"
+                   value="<?= e($_old('departure_scheduled', substr($trip['departure_scheduled'] ?? '06:00:00', 0, 5))) ?>"
+                   class="cb-input w-full">
+            <?php if (isset($_errors['departure_scheduled'])): ?><p class="cb-error"><?= e($_errors['departure_scheduled']) ?></p><?php endif ?>
+          </div>
+          <div>
+            <label for="arrival_scheduled" class="cb-label">Arrivée prévue</label>
+            <input type="time" id="arrival_scheduled" name="arrival_scheduled"
+                   value="<?= e($_old('arrival_scheduled', substr($trip['arrival_scheduled'] ?? '', 0, 5))) ?>"
+                   class="cb-input w-full">
+            <p class="cb-hint">Heure d'arrivée estimée à destination</p>
+          </div>
+          <?php if ($isEdit): ?>
+          <div>
+            <label for="departure_actual" class="cb-label">Départ réel</label>
+            <input type="time" id="departure_actual" name="departure_actual"
+                   value="<?= e(substr($trip['departure_actual'] ?? '', 0, 5)) ?>"
+                   class="cb-input w-full">
+            <p class="cb-hint">À remplir après le départ effectif</p>
+          </div>
+          <div>
+            <label for="arrival_actual" class="cb-label">Arrivée réelle</label>
+            <input type="time" id="arrival_actual" name="arrival_actual"
+                   value="<?= e(substr($trip['arrival_actual'] ?? '', 0, 5)) ?>"
+                   class="cb-input w-full">
+          </div>
+          <?php endif ?>
+          <div>
+            <label for="mileage_start" class="cb-label">Km compteur départ</label>
+            <div class="relative">
+              <input type="number" id="mileage_start" name="mileage_start" min="0"
+                     value="<?= e($_old('mileage_start', $trip['mileage_start'] ?? '')) ?>"
+                     placeholder="Ex: 124500" class="cb-input w-full pr-12">
+              <span class="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-400 font-medium">km</span>
+            </div>
+          </div>
+          <?php if ($isEdit): ?>
+          <div>
+            <label for="mileage_end" class="cb-label">Km compteur arrivée</label>
+            <div class="relative">
+              <input type="number" id="mileage_end" name="mileage_end" min="0"
+                     value="<?= e($trip['mileage_end'] ?? '') ?>"
+                     placeholder="Ex: 125010" class="cb-input w-full pr-12">
+              <span class="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-400 font-medium">km</span>
+            </div>
+          </div>
+          <?php endif ?>
+          <div class="sm:col-span-2">
+            <label for="weather_conditions" class="cb-label">Conditions météo</label>
+            <input type="text" id="weather_conditions" name="weather_conditions"
+                   value="<?= e($_old('weather_conditions', $trip['weather_conditions'] ?? '')) ?>"
+                   placeholder="Ex: Beau temps, pluie en fin de trajet…"
+                   class="cb-input w-full">
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══ Onglet NOTES ════════════════════════════════════════════ -->
+      <div x-show="tab === 'notes'" x-transition>
+        <h2 class="cb-form-section mb-5">
+          <i data-lucide="file-text" class="w-4 h-4 text-cb-primary"></i> Notes &amp; incidents
+        </h2>
+        <div class="space-y-8">
+
+          <!-- ── Notes internes ──────────────────────────────────────── -->
+          <div class="space-y-3">
+            <div class="flex items-center justify-between">
+              <h3 class="font-semibold text-slate-800 text-sm flex items-center gap-2">
+                <i data-lucide="file-text" class="w-4 h-4 text-slate-400"></i>
+                Notes internes
+                <span class="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full font-normal"
+                      x-text="notes.length + ' note(s)'"></span>
+              </h3>
+              <button type="button" @click="addNote()"
+                      class="text-sm font-semibold text-cb-primary hover:text-cb-dark transition inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl hover:bg-cb-bg">
+                <i data-lucide="plus" class="w-4 h-4"></i> Ajouter
+              </button>
+            </div>
+
+            <template x-for="(note, idx) in notes" :key="idx">
+              <div class="border border-slate-200 rounded-2xl p-4 relative">
+                <button type="button" @click="removeNote(idx)"
+                        class="absolute top-3 right-3 w-7 h-7 flex items-center justify-center rounded-lg text-slate-400 hover:bg-rose-50 hover:text-rose-500 transition">
+                  <i data-lucide="x" class="w-4 h-4"></i>
+                </button>
+                <div class="flex items-center gap-2 mb-2">
+                  <span class="w-5 h-5 rounded-full bg-slate-100 text-slate-600 flex items-center justify-center text-xs font-bold"
+                        x-text="idx + 1"></span>
+                  <span class="text-xs text-slate-500 font-medium">Note</span>
+                </div>
+                <textarea :name="'notes[' + idx + ']'" x-model="notes[idx]" rows="3"
+                          placeholder="Instructions particulières, organisation du voyage…"
+                          class="cb-input w-full resize-none"></textarea>
+              </div>
+            </template>
+
+            <div x-show="notes.length === 0"
+                 class="border-2 border-dashed border-slate-200 rounded-2xl p-7 text-center">
+              <i data-lucide="file-plus" class="w-8 h-8 mx-auto mb-2 text-slate-300"></i>
+              <p class="text-sm text-slate-400">Aucune note interne.</p>
+              <button type="button" @click="addNote()"
+                      class="mt-2 text-sm text-cb-primary font-semibold hover:text-cb-dark transition">+ Ajouter une note</button>
+            </div>
+          </div>
+
+          <!-- ── Rapport d'incidents ─────────────────────────────────── -->
+          <div class="space-y-3">
+            <div class="flex items-center justify-between">
+              <h3 class="font-semibold text-slate-800 text-sm flex items-center gap-2">
+                <i data-lucide="alert-triangle" class="w-4 h-4 text-amber-500"></i>
+                Rapport d'incidents
+                <span class="text-xs bg-amber-50 text-amber-600 border border-amber-200 px-2 py-0.5 rounded-full font-normal"
+                      x-text="incidents.length + ' rapport(s)'"></span>
+              </h3>
+              <button type="button" @click="addIncident()"
+                      class="text-sm font-semibold text-amber-600 hover:text-amber-800 transition inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl hover:bg-amber-50">
+                <i data-lucide="plus" class="w-4 h-4"></i> Signaler
+              </button>
+            </div>
+
+            <template x-for="(inc, idx) in incidents" :key="idx">
+              <div class="border border-amber-200 bg-amber-50/40 rounded-2xl p-4 relative">
+                <button type="button" @click="removeIncident(idx)"
+                        class="absolute top-3 right-3 w-7 h-7 flex items-center justify-center rounded-lg text-amber-400 hover:bg-rose-50 hover:text-rose-500 transition">
+                  <i data-lucide="x" class="w-4 h-4"></i>
+                </button>
+                <div class="flex items-center gap-2 mb-2">
+                  <span class="w-5 h-5 rounded-full bg-amber-100 text-amber-700 flex items-center justify-center text-xs font-bold"
+                        x-text="idx + 1"></span>
+                  <span class="text-xs text-amber-700 font-medium">Incident</span>
+                </div>
+                <textarea :name="'incident_notes[' + idx + ']'" x-model="incidents[idx]" rows="3"
+                          placeholder="Panne, incident, retard et sa cause…"
+                          class="cb-input w-full resize-none"></textarea>
+              </div>
+            </template>
+
+            <div x-show="incidents.length === 0"
+                 class="border-2 border-dashed border-amber-200 rounded-2xl p-7 text-center">
+              <i data-lucide="shield-check" class="w-8 h-8 mx-auto mb-2 text-amber-200"></i>
+              <p class="text-sm text-amber-500">Aucun incident signalé.</p>
+              <button type="button" @click="addIncident()"
+                      class="mt-2 text-sm text-amber-600 font-semibold hover:text-amber-800 transition">+ Signaler un incident</button>
+            </div>
+            <p class="cb-hint">Rapports visibles uniquement par les responsables et managers.</p>
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Barre d'actions ─────────────────────────────────────────── -->
+    <div class="border-t border-slate-100 bg-slate-50 px-6 py-4 flex items-center justify-between gap-3">
+      <a href="<?= e($isEdit ? url('voyages/'.$trip['id']) : url('voyages')) ?>"
+         class="px-5 py-2.5 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-100 transition text-sm font-medium inline-flex items-center gap-2">
+        <i data-lucide="x" class="w-4 h-4"></i> Annuler
+      </a>
+      <div class="flex items-center gap-3">
+        <button type="button" x-show="tab === 'trajet'" @click="tab = 'equipe'"
+                class="px-5 py-2.5 rounded-xl border border-cb-primary text-cb-primary hover:bg-cb-bg transition text-sm font-semibold inline-flex items-center gap-2">
+          Suivant <i data-lucide="arrow-right" class="w-4 h-4"></i>
+        </button>
+        <button type="button" x-show="tab === 'equipe'" @click="tab = 'horaires'"
+                class="px-5 py-2.5 rounded-xl border border-cb-primary text-cb-primary hover:bg-cb-bg transition text-sm font-semibold inline-flex items-center gap-2">
+          Suivant <i data-lucide="arrow-right" class="w-4 h-4"></i>
+        </button>
+        <button type="button" x-show="tab === 'horaires'" @click="tab = 'notes'"
+                class="px-5 py-2.5 rounded-xl border border-cb-primary text-cb-primary hover:bg-cb-bg transition text-sm font-semibold inline-flex items-center gap-2">
+          Suivant <i data-lucide="arrow-right" class="w-4 h-4"></i>
+        </button>
+        <button type="submit" data-dirty-submit
+                class="px-6 py-2.5 rounded-xl bg-cb-primary text-white font-bold hover:bg-cb-dark transition shadow-soft inline-flex items-center gap-2">
+          <i data-lucide="check" class="w-4 h-4"></i>
+          <?= $isEdit ? 'Enregistrer les modifications' : 'Créer le voyage' ?>
+        </button>
+      </div>
+    </div>
+  </form>
+</div>
+
+<script>
+const STOPS_BY_LINE = <?= json_encode($_stopsByLine) ?>;
+
+function voyageForm() {
+  return {
+    tab: '<?= $_tabWithError ?>',
+    selectedLineId: '<?= e((string)($_old('line_id', $trip['line_id'] ?? ''))) ?>',
+    lineInfo: { code:'', dep:'', arr:'', dist:'', dur:'' },
+    lineStops: [],
+    crew: <?= json_encode($_crewInit) ?>,
+    notes: <?= json_encode($_notesInit) ?>,
+    incidents: <?= json_encode($_incidentInit) ?>,
+
+    init() {
+      if (this.selectedLineId) this.onLineChange();
+      this.$nextTick(() => { if (typeof lucide !== 'undefined') lucide.createIcons(); });
+    },
+
+    onLineChange() {
+      const sel = document.getElementById('line_id');
+      const opt = sel ? sel.options[sel.selectedIndex] : null;
+      if (opt && opt.value) {
+        this.lineInfo = { code: opt.value, dep: opt.dataset.dep||'', arr: opt.dataset.arr||'', dist: opt.dataset.dist||'', dur: opt.dataset.dur||'' };
+        this.lineStops = STOPS_BY_LINE[opt.value] || [];
+      } else {
+        this.lineInfo = { code:'', dep:'', arr:'', dist:'', dur:'' };
+        this.lineStops = [];
+      }
+      this.$nextTick(() => { if (typeof lucide !== 'undefined') lucide.createIcons(); });
+    },
+
+    addCrew() {
+      this.crew.push({ employee_id: '', role: 'convoyeur', notes: '' });
+      this.$nextTick(() => { if (typeof lucide !== 'undefined') lucide.createIcons(); });
+    },
+
+    removeCrew(idx) { this.crew.splice(idx, 1); },
+
+    addNote() { this.notes.push(''); this.$nextTick(() => { if (typeof lucide !== 'undefined') lucide.createIcons(); }); },
+    removeNote(idx) { this.notes.splice(idx, 1); },
+
+    addIncident() { this.incidents.push(''); this.$nextTick(() => { if (typeof lucide !== 'undefined') lucide.createIcons(); }); },
+    removeIncident(idx) { this.incidents.splice(idx, 1); },
+  };
+}
+</script>
+<?php $view->end() ?>

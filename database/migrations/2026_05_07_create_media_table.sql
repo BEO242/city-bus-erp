@@ -1,0 +1,25 @@
+-- Table polymorphique des médias (galerie + documents) attachés à n'importe quel modèle.
+CREATE TABLE IF NOT EXISTS media (
+    id            BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    mediable_type VARCHAR(64)     NOT NULL,
+    mediable_id   BIGINT UNSIGNED NOT NULL,
+    collection    VARCHAR(32)     NOT NULL DEFAULT 'gallery',
+    file_path     VARCHAR(255)    NOT NULL,
+    file_name     VARCHAR(255)    NOT NULL,
+    file_hash     CHAR(64)        NULL,
+    mime_type     VARCHAR(128)    NOT NULL,
+    size          BIGINT UNSIGNED NOT NULL DEFAULT 0,
+    width         INT UNSIGNED    NULL,
+    height        INT UNSIGNED    NULL,
+    alt_text      VARCHAR(255)    NULL,
+    caption       VARCHAR(255)    NULL,
+    sort_order    INT             NOT NULL DEFAULT 0,
+    uploaded_by   BIGINT UNSIGNED NULL,
+    created_at    TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at    TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    INDEX idx_media_mediable (mediable_type, mediable_id),
+    INDEX idx_media_collection (mediable_type, mediable_id, collection),
+    INDEX idx_media_sort (mediable_type, mediable_id, sort_order),
+    CONSTRAINT fk_media_uploader FOREIGN KEY (uploaded_by) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

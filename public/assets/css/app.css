@@ -1,0 +1,275 @@
+/* ============================================================
+   City Bus ERP — Styles personnalisés (complement Tailwind)
+   ============================================================ */
+
+:root {
+  --cb-primary: #C62828;
+  --cb-secondary: #8E0000;
+  --cb-accent: #F9A825;
+  --cb-dark: #6A0000;
+  --cb-bg: #FFEBEE;
+}
+
+html { scroll-behavior: smooth; }
+body { font-family: 'Inter', system-ui, -apple-system, sans-serif; }
+
+/* Scrollbar custom */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: #f1f5f9; }
+::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+::-webkit-scrollbar-thumb:hover { background: var(--cb-primary); }
+
+/* Animations */
+@keyframes fadeIn { from {opacity:0; transform:translateY(8px)} to {opacity:1; transform:translateY(0)} }
+.animate-fade-in { animation: fadeIn .3s ease-out; }
+
+@keyframes pulse-ring {
+  0% { box-shadow: 0 0 0 0 rgba(21,101,192,.4); }
+  70% { box-shadow: 0 0 0 12px rgba(21,101,192,0); }
+  100% { box-shadow: 0 0 0 0 rgba(21,101,192,0); }
+}
+.pulse-ring { animation: pulse-ring 2s infinite; }
+
+/* Transitions globales */
+a, button, input, textarea { transition: all .15s ease; }
+
+/* Focus accessibles */
+*:focus-visible {
+  outline: 2px solid var(--cb-primary);
+  outline-offset: 2px;
+}
+
+/* ============================================================
+   IMPRESSION TICKET — A5 thermique
+   ============================================================ */
+@media print {
+  body * { visibility: hidden; }
+  .printable, .printable * { visibility: visible; }
+  .printable { position: absolute; top: 0; left: 0; width: 100%; }
+  .no-print { display: none !important; }
+  @page { size: A5; margin: 8mm; }
+}
+
+/* Connection offline indicator */
+.offline-banner {
+  position: fixed; bottom: 0; left: 0; right: 0;
+  background: #f59e0b; color: white;
+  text-align: center; padding: .5rem;
+  font-size: .875rem; font-weight: 600;
+  z-index: 9999;
+  transform: translateY(100%);
+  transition: transform .3s;
+}
+.offline-banner.show { transform: translateY(0); }
+
+/* QR scanner overlay */
+#qr-video { background: #0a0e1a; }
+.scanner-frame {
+  position: absolute; top: 50%; left: 50%;
+  width: 60%; aspect-ratio: 1;
+  transform: translate(-50%, -50%);
+  border: 3px solid var(--cb-accent);
+  border-radius: 1rem;
+  box-shadow: 0 0 0 9999px rgba(0,0,0,.5);
+  pointer-events: none;
+}
+
+/* Tableau hover row */
+tbody tr { transition: background .12s; }
+
+/* ============================================================
+   FORMULAIRES — cb-label / cb-input / cb-select
+   ============================================================ */
+
+/* Label */
+.cb-label {
+  display: block;
+  font-size: .75rem;
+  font-weight: 600;
+  color: #475569;           /* slate-600 */
+  letter-spacing: .025em;
+  margin-bottom: .375rem;
+  text-transform: uppercase;
+}
+
+/* Champ de base (input, select, textarea) */
+.cb-input {
+  display: block;
+  width: 100%;
+  padding: .625rem .875rem;
+  background: #fff;
+  border: 1.5px solid #e2e8f0;   /* slate-200 */
+  border-radius: .625rem;
+  font-size: .875rem;
+  color: #0f172a;                 /* slate-900 */
+  line-height: 1.5;
+  transition: border-color .15s, box-shadow .15s, background .15s;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.cb-input::placeholder {
+  color: #94a3b8;                 /* slate-400 */
+  font-weight: 400;
+}
+
+/* Focus : anneau rouge */
+.cb-input:focus {
+  outline: none;
+  border-color: #C62828;
+  box-shadow: 0 0 0 3px rgba(198,40,40,.12);
+  background: #fff;
+}
+
+/* Hover subtil */
+.cb-input:hover:not(:focus) {
+  border-color: #cbd5e1;          /* slate-300 */
+}
+
+/* État invalide */
+.cb-input.is-invalid,
+.cb-input:invalid:not(:placeholder-shown) {
+  border-color: #e11d48;
+  box-shadow: 0 0 0 3px rgba(225,29,72,.1);
+}
+
+/* Select : flèche personnalisée */
+select.cb-input {
+  -webkit-appearance: none !important;
+  appearance: none !important;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none'%3E%3Cpath d='M7 8l3 3 3-3' stroke='%2394a3b8' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") !important;
+  background-repeat: no-repeat !important;
+  background-position: right .625rem center !important;
+  background-size: 1.25rem !important;
+  padding-right: 2.25rem;
+  cursor: pointer;
+  /* Exclure background-image des transitions pour éviter le rendu de multiples frames */
+  transition: border-color .15s, box-shadow .15s !important;
+}
+
+select.cb-input:focus {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none'%3E%3Cpath d='M7 8l3 3 3-3' stroke='%23C62828' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") !important;
+  background-repeat: no-repeat !important;
+  background-position: right .625rem center !important;
+  background-size: 1.25rem !important;
+}
+
+/* Textarea */
+textarea.cb-input {
+  resize: vertical;
+  min-height: 6rem;
+}
+
+/* Champ désactivé */
+.cb-input:disabled,
+.cb-input[readonly] {
+  background: #f8fafc;
+  color: #64748b;
+  cursor: not-allowed;
+  border-color: #e2e8f0;
+}
+
+/* Input mono (codes) */
+.cb-input.font-mono {
+  font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
+  letter-spacing: .05em;
+  font-size: .8125rem;
+}
+
+/* Wrapper avec icône à gauche */
+.cb-input-group {
+  position: relative;
+}
+.cb-input-group .cb-input {
+  padding-left: 2.5rem;
+}
+.cb-input-group .cb-input-icon {
+  position: absolute;
+  left: .75rem;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 1rem;
+  height: 1rem;
+  color: #94a3b8;
+  pointer-events: none;
+  transition: color .15s;
+}
+.cb-input-group:focus-within .cb-input-icon {
+  color: #C62828;
+}
+
+/* Message d'aide sous le champ */
+.cb-hint {
+  font-size: .7rem;
+  color: #94a3b8;
+  margin-top: .25rem;
+}
+
+/* Message d'erreur */
+.cb-error {
+  font-size: .7rem;
+  color: #e11d48;
+  margin-top: .25rem;
+  display: flex;
+  align-items: center;
+  gap: .25rem;
+}
+
+/* Section de formulaire (card interne) */
+.cb-form-section {
+  background: #fff;
+  border-radius: 1rem;
+  border: 1px solid #f1f5f9;
+  box-shadow: 0 1px 3px rgba(0,0,0,.04), 0 1px 2px rgba(0,0,0,.03);
+  padding: 1.5rem;
+}
+
+.cb-form-section + .cb-form-section {
+  margin-top: 1.25rem;
+}
+
+/* En-tête de section */
+.cb-section-title {
+  font-size: .875rem;
+  font-weight: 700;
+  color: #1e293b;
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  padding-bottom: 1rem;
+  margin-bottom: 1rem;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+/* Checkbox stylée */
+.cb-checkbox {
+  width: 1.125rem;
+  height: 1.125rem;
+  border-radius: .3rem;
+  border: 1.5px solid #cbd5e1;
+  accent-color: #C62828;
+  cursor: pointer;
+  transition: border-color .15s;
+}
+.cb-checkbox:hover { border-color: #C62828; }
+.cb-checkbox:focus { outline: none; box-shadow: 0 0 0 3px rgba(198,40,40,.15); }
+
+/* Barre d'action de formulaire */
+.cb-form-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #fff;
+  border-radius: 1rem;
+  border: 1px solid #f1f5f9;
+  box-shadow: 0 1px 3px rgba(0,0,0,.04);
+  padding: 1rem 1.5rem;
+}
+
+/* Badge "required" */
+.cb-required {
+  color: #e11d48;
+  font-size: .875em;
+  margin-left: .1em;
+}
+

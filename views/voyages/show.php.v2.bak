@@ -1,0 +1,799 @@
+<?php
+/** @var \CityBus\Core\View $view */
+$view->extends('layouts/app');
+use CityBus\Models\Trip;
+
+$booked     = array_flip(array_map('intval', $bookedSeats));
+$totalSeats = (int)($trip['bus_seats'] ?? 0);
+$soldCount  = count($bookedSeats);
+$occupancy  = $totalSeats > 0 ? round($soldCount / $totalSeats * 100) : 0;
+$revenue    = (int)($trip['total_revenue'] ?? 0);
+$delay      = (int)($trip['delay_minutes'] ?? 0);
+$tolerance  = \CityBus\Core\Setting::getInt('voyage.delay_tolerance_minutes', 15);
+
+$statusMeta = [
+  'planifie'     => ['label'=>'Planifié',    'cls'=>'bg-slate-100 text-slate-600 border-slate-200',         'dot'=>'bg-slate-400',  'icon'=>'clock'],
+  'valide'       => ['label'=>'Validé',      'cls'=>'bg-cyan-50 text-cyan-700 border-cyan-200',             'dot'=>'bg-cyan-500',   'icon'=>'check'],
+  'embarquement' => ['label'=>'Embarquement','cls'=>'bg-amber-50 text-amber-700 border-amber-200',          'dot'=>'bg-amber-400',  'icon'=>'users'],
+  'en_route'     => ['label'=>'En route',    'cls'=>'bg-cb-primary text-white border-cb-primary',           'dot'=>'bg-white',      'icon'=>'navigation'],
+  'arrive'       => ['label'=>'Arrivé',      'cls'=>'bg-emerald-50 text-emerald-700 border-emerald-200',    'dot'=>'bg-emerald-500','icon'=>'map-pin'],
+  'cloture'      => ['label'=>'Clôturé',     'cls'=>'bg-emerald-100 text-emerald-800 border-emerald-300',   'dot'=>'bg-emerald-600','icon'=>'check-circle'],
+  'incident'     => ['label'=>'Incident',    'cls'=>'bg-rose-50 text-rose-700 border-rose-200',             'dot'=>'bg-rose-500',   'icon'=>'alert-triangle'],
+  'retourne'     => ['label'=>'Retourné',    'cls'=>'bg-orange-50 text-orange-700 border-orange-200',       'dot'=>'bg-orange-500', 'icon'=>'undo-2'],
+  'litige'       => ['label'=>'Litige',      'cls'=>'bg-purple-50 text-purple-700 border-purple-200',       'dot'=>'bg-purple-500', 'icon'=>'gavel'],
+  'annule'       => ['label'=>'Annulé',      'cls'=>'bg-rose-50 text-rose-600 border-rose-200',             'dot'=>'bg-rose-400',   'icon'=>'x-circle'],
+];
+$sm = $statusMeta[$trip['status']] ?? $statusMeta['planifie'];
+
+$crewByRole = [];
+foreach ($crew as $c) { $crewByRole[$c['role']][] = $c; }
+
+$passengerTickets = array_values(array_filter($tickets, fn($t) => in_array($t['ticket_type'], ['passager','arret_route','finale'])));
+$baggageTickets   = array_values(array_filter($tickets, fn($t) => in_array($t['ticket_type'], ['bagage_franchise','bagage_excedent'])));
+
+$tabs = [
+  'details'      => ['Vue d\'ensemble','layout-dashboard',null],
+  'passengers'   => ['Passagers','users',count($passengerTickets)],
+  'cargo'        => ['Cargo','package',count($parcels ?? [])],
+  'reservations' => ['Réservations','clipboard-list',count($reservations ?? [])],
+  'waitlist'     => ['Liste d\'attente','users-2',count($waitlist ?? [])],
+  'inspection'   => ['Pré-vérif','clipboard-check', $inspection ? 1 : 0],
+  'pnl'          => ['P&L','trending-up', $pnl ? 1 : null],
+  'documents'    => ['Documents','file-text',count($documents ?? [])],
+  'costs'        => ['Coûts','wallet',count($costs ?? [])],
+  'disputes'     => ['Litiges','gavel',count($disputes ?? [])],
+  'messages'     => ['Communication','message-square',count($messages ?? [])],
+  'audit'        => ['Audit','history',count($statusTimeline ?? [])],
+];
+$activeTab = $activeTab ?? 'details';
+?>
+<?php $view->start('content') ?>
+<div class="space-y-5" x-data="{ tab: '<?= e($activeTab) ?>', actions: false }" x-cloak>
+
+  <!-- ── Fil d'Ariane ─────────────────────────────────── -->
+  <div class="flex items-center gap-2 text-sm text-slate-500">
+    <a href="<?= e(url('voyages')) ?>" class="hover:text-cb-primary inline-flex items-center gap-1">
+      <i data-lucide="chevron-left" class="w-4 h-4"></i> Voyages
+    </a>
+    <span>/</span>
+    <span class="text-slate-800 font-mono font-semibold"><?= e($trip['trip_code']) ?></span>
+    <?php if (!empty($trip['parent_trip_code'])): ?>
+      <span>·</span>
+      <span class="text-xs px-2 py-0.5 rounded bg-amber-50 text-amber-700">remplace
+        <a href="<?= e(url('voyages?search=' . urlencode($trip['parent_trip_code']))) ?>" class="font-mono underline"><?= e($trip['parent_trip_code']) ?></a>
+      </span>
+    <?php endif ?>
+  </div>
+
+  <!-- ── En-tête voyage ───────────────────────────────── -->
+  <div class="bg-white rounded-2xl border border-slate-100 shadow-soft p-6">
+    <div class="flex flex-wrap gap-4 items-start justify-between">
+      <div class="flex items-start gap-4">
+        <div class="w-14 h-14 rounded-2xl bg-cb-bg flex items-center justify-center shrink-0">
+          <i data-lucide="bus" class="w-7 h-7 text-cb-primary"></i>
+        </div>
+        <div>
+          <div class="flex items-center gap-2 flex-wrap">
+            <h1 class="text-2xl font-bold text-slate-900"><?= e($trip['line_code']) ?> · <?= e($trip['line_name']) ?></h1>
+            <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-semibold border <?= $sm['cls'] ?>">
+              <i data-lucide="<?= e($sm['icon']) ?>" class="w-3.5 h-3.5"></i><?= $sm['label'] ?>
+            </span>
+            <?php if ($manifestLocked): ?>
+              <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-slate-900 text-white">
+                <i data-lucide="lock" class="w-3 h-3"></i> Verrouillé
+              </span>
+            <?php endif ?>
+            <?php if ($trip['priority'] && $trip['priority'] !== 'normale'): ?>
+              <span class="px-2.5 py-1 rounded-full text-xs font-bold bg-purple-100 text-purple-700"><?= e(strtoupper($trip['priority'])) ?></span>
+            <?php endif ?>
+          </div>
+          <p class="text-slate-500 text-sm mt-1 flex items-center gap-3 flex-wrap">
+            <span class="flex items-center gap-1"><i data-lucide="calendar" class="w-3.5 h-3.5"></i><?= e(date_fr($trip['trip_date'])) ?></span>
+            <span class="flex items-center gap-1"><i data-lucide="clock" class="w-3.5 h-3.5"></i>
+              Prévu <?= e(substr($trip['departure_scheduled'], 0, 5)) ?>
+              <?php if (!empty($trip['departure_actual'])): ?>
+                <span class="<?= $delay > $tolerance ? 'text-rose-600 font-bold' : ($delay > 0 ? 'text-amber-600' : 'text-emerald-600') ?>">
+                  · réel <?= e(substr($trip['departure_actual'], 0, 5)) ?>
+                  <?php if ($delay !== 0): ?>(<?= $delay > 0 ? '+' : '' ?><?= $delay ?>min)<?php endif ?>
+                </span>
+              <?php endif ?>
+            </span>
+            <?php if (!empty($trip['arrival_actual'])): ?>
+              <span class="flex items-center gap-1"><i data-lucide="map-pin" class="w-3.5 h-3.5"></i>Arrivé <?= e(substr($trip['arrival_actual'], 0, 5)) ?></span>
+            <?php endif ?>
+          </p>
+          <p class="font-mono text-xs text-slate-400 mt-1"><?= e($trip['trip_code']) ?>
+            <?php if (!empty($trip['external_reference'])): ?>· réf. <?= e($trip['external_reference']) ?><?php endif ?>
+          </p>
+        </div>
+      </div>
+
+      <!-- Actions -->
+      <div class="flex items-center gap-2 flex-wrap">
+        <?php if (can('billetterie.create') && !$manifestLocked && !Trip::isTerminal($trip['status'])): ?>
+          <a href="<?= e(url('billetterie/sale/'.$trip['id'])) ?>"
+             class="px-4 py-2.5 rounded-xl bg-cb-primary text-white font-semibold inline-flex items-center gap-2 hover:bg-cb-dark shadow-soft">
+            <i data-lucide="ticket" class="w-4 h-4"></i> Vendre ticket
+          </a>
+        <?php endif ?>
+        <a href="<?= e(url('voyages/'.$trip['id'].'/manifest')) ?>"
+           class="px-3 py-2.5 rounded-xl border border-slate-200 text-slate-700 hover:bg-slate-50 inline-flex items-center gap-2 text-sm">
+          <i data-lucide="printer" class="w-4 h-4"></i> Manifeste
+        </a>
+        <?php if (can('voyages.edit') && !Trip::isTerminal($trip['status'])): ?>
+          <a href="<?= e(url('voyages/'.$trip['id'].'/edit')) ?>"
+             class="px-3 py-2.5 rounded-xl border border-slate-200 text-slate-700 hover:bg-slate-50 inline-flex items-center gap-2 text-sm">
+            <i data-lucide="pencil" class="w-4 h-4"></i> Modifier
+          </a>
+        <?php endif ?>
+
+        <!-- Menu actions plus -->
+        <div class="relative">
+          <button @click="actions = !actions"
+                  class="px-3 py-2.5 rounded-xl border border-slate-200 text-slate-700 hover:bg-slate-50 inline-flex items-center gap-2 text-sm">
+            <i data-lucide="more-horizontal" class="w-4 h-4"></i> Actions
+          </button>
+          <div x-show="actions" @click.outside="actions = false" x-cloak
+               class="absolute right-0 top-12 w-64 bg-white rounded-xl border border-slate-100 shadow-xl z-30 py-1 text-sm">
+            <?php if (can('voyages.communicate') && !Trip::isTerminal($trip['status'])): ?>
+              <button @click="$dispatch('open-modal','communicate'); actions=false" class="w-full text-left px-4 py-2.5 hover:bg-cb-bg/40 flex items-center gap-2">
+                <i data-lucide="message-circle" class="w-4 h-4 text-cb-primary"></i> Communiquer aux passagers
+              </button>
+            <?php endif ?>
+            <?php if (can('voyages.replace_bus') && in_array($trip['status'], ['planifie','valide','embarquement','en_route','incident'], true)): ?>
+              <button @click="$dispatch('open-modal','replace-bus'); actions=false" class="w-full text-left px-4 py-2.5 hover:bg-cb-bg/40 flex items-center gap-2">
+                <i data-lucide="truck" class="w-4 h-4 text-cb-primary"></i> Changer le bus
+              </button>
+            <?php endif ?>
+            <?php if (can('voyages.replace_driver') && in_array($trip['status'], ['planifie','valide','embarquement','en_route','incident'], true)): ?>
+              <button @click="$dispatch('open-modal','replace-driver'); actions=false" class="w-full text-left px-4 py-2.5 hover:bg-cb-bg/40 flex items-center gap-2">
+                <i data-lucide="user" class="w-4 h-4 text-cb-primary"></i> Changer le chauffeur
+              </button>
+            <?php endif ?>
+            <?php if ($manifestLocked && can('voyages.unlock_manifest')): ?>
+              <button @click="$dispatch('open-modal','unlock'); actions=false" class="w-full text-left px-4 py-2.5 hover:bg-cb-bg/40 flex items-center gap-2">
+                <i data-lucide="unlock" class="w-4 h-4 text-cb-primary"></i> Déverrouiller manifeste
+              </button>
+            <?php elseif (can('voyages.lock_manifest')): ?>
+              <form method="post" action="<?= e(url('voyages/'.$trip['id'].'/lock')) ?>">
+                <?= csrf_field() ?>
+                <button type="submit" class="w-full text-left px-4 py-2.5 hover:bg-cb-bg/40 flex items-center gap-2">
+                  <i data-lucide="lock" class="w-4 h-4 text-cb-primary"></i> Verrouiller manifeste
+                </button>
+              </form>
+            <?php endif ?>
+            <?php if (in_array($trip['status'], ['incident','retourne'], true) && can('voyages.create')): ?>
+              <button @click="$dispatch('open-modal','replacement'); actions=false" class="w-full text-left px-4 py-2.5 hover:bg-cb-bg/40 flex items-center gap-2">
+                <i data-lucide="copy" class="w-4 h-4 text-cb-primary"></i> Créer un voyage de remplacement
+              </button>
+            <?php endif ?>
+            <div class="border-t border-slate-100 my-1"></div>
+            <?php if (!Trip::isTerminal($trip['status'])): ?>
+              <button @click="$dispatch('open-modal','status'); actions=false" class="w-full text-left px-4 py-2.5 hover:bg-cb-bg/40 flex items-center gap-2">
+                <i data-lucide="git-branch" class="w-4 h-4 text-cb-primary"></i> Changer le statut
+              </button>
+            <?php endif ?>
+            <?php if (can('voyages.delete')): ?>
+              <form method="post" action="<?= e(url('voyages/'.$trip['id'].'/delete')) ?>" onsubmit="return confirm('Supprimer définitivement ce voyage ?')">
+                <?= csrf_field() ?>
+                <button type="submit" class="w-full text-left px-4 py-2.5 hover:bg-rose-50 text-rose-600 flex items-center gap-2">
+                  <i data-lucide="trash-2" class="w-4 h-4"></i> Supprimer
+                </button>
+              </form>
+            <?php endif ?>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <?php if (!empty($trip['cancellation_reason'])): ?>
+      <div class="mt-4 p-3 rounded-xl bg-rose-50 border border-rose-200 text-sm text-rose-800">
+        <strong>Motif d'annulation :</strong> <?= e($trip['cancellation_reason']) ?>
+      </div>
+    <?php endif ?>
+    <?php if (!empty($trip['replaced_bus_code'])): ?>
+      <div class="mt-3 p-3 rounded-xl bg-amber-50 border border-amber-200 text-sm text-amber-800">
+        <i data-lucide="alert-circle" class="w-4 h-4 inline"></i> Bus remplacé en cours : ancien <strong><?= e($trip['replaced_bus_code']) ?></strong>
+      </div>
+    <?php endif ?>
+  </div>
+
+  <!-- ── KPI cards ───────────────────────────────────── -->
+  <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+    <div class="cockpit-kpi">
+      <div class="cockpit-kpi-label">Bus</div>
+      <div class="cockpit-kpi-value"><?= e($trip['bus_code']) ?></div>
+      <p class="text-xs text-slate-400 mt-1"><?= e($trip['bus_plate']) ?> · <?= (int)$trip['bus_seats'] ?> places</p>
+    </div>
+    <div class="cockpit-kpi">
+      <div class="cockpit-kpi-label">Chauffeur</div>
+      <div class="cockpit-kpi-value text-base"><?= e(trim(($trip['driver_first']??'').' '.($trip['driver_last']??''))) ?: '—' ?></div>
+      <p class="text-xs text-slate-400 mt-1"><?= e($trip['driver_matricule'] ?? '') ?> <?= e($trip['driver_phone'] ?? '') ?></p>
+    </div>
+    <div class="cockpit-kpi <?= $occupancy >= 80 ? 'green' : ($occupancy >= 50 ? 'amber' : '') ?>">
+      <div class="cockpit-kpi-label">Charge</div>
+      <div class="cockpit-kpi-value"><?= $occupancy ?><span class="unit">%</span></div>
+      <p class="text-xs text-slate-400 mt-1"><?= $soldCount ?> / <?= $totalSeats ?> places</p>
+    </div>
+    <div class="cockpit-kpi green">
+      <div class="cockpit-kpi-label">Recettes</div>
+      <div class="cockpit-kpi-value"><?= e(fcfa($revenue)) ?></div>
+    </div>
+  </div>
+
+  <!-- ── Onglets ─────────────────────────────────────── -->
+  <div class="bg-white rounded-2xl border border-slate-100 shadow-soft overflow-hidden">
+    <div class="border-b border-slate-100 overflow-x-auto">
+      <div class="flex gap-1 px-3 py-2 min-w-max">
+        <?php foreach ($tabs as $key => [$lbl, $icon, $count]): ?>
+          <button @click="tab='<?= e($key) ?>'"
+            :class="tab==='<?= e($key) ?>' ? 'bg-cb-primary text-white' : 'text-slate-600 hover:bg-slate-50'"
+            class="px-3 py-2 rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 whitespace-nowrap">
+            <i data-lucide="<?= e($icon) ?>" class="w-3.5 h-3.5"></i>
+            <?= e($lbl) ?>
+            <?php if ($count !== null && $count > 0): ?>
+              <span :class="tab==='<?= e($key) ?>' ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-500'" class="px-1.5 py-0.5 rounded-full text-[10px] font-bold"><?= $count ?></span>
+            <?php endif ?>
+          </button>
+        <?php endforeach ?>
+      </div>
+    </div>
+
+    <!-- ── TAB DETAILS ── -->
+    <div x-show="tab==='details'" class="p-6">
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div>
+          <h3 class="font-semibold text-slate-700 mb-3">Trajet</h3>
+          <div class="space-y-2 text-sm">
+            <div class="flex justify-between"><span class="text-slate-500">Origine</span><span class="font-medium"><?= e($trip['departure_city_name']) ?></span></div>
+            <div class="flex justify-between"><span class="text-slate-500">Destination</span><span class="font-medium"><?= e($trip['arrival_city_name']) ?></span></div>
+            <div class="flex justify-between"><span class="text-slate-500">Distance</span><span class="font-medium mono"><?= number_format((float)($trip['distance_km'] ?? 0), 0, ',', ' ') ?> km</span></div>
+            <div class="flex justify-between"><span class="text-slate-500">Durée prévue</span><span class="font-medium"><?= number_format((float)($trip['duration_hours'] ?? 0), 1, ',', '') ?> h</span></div>
+            <div class="flex justify-between"><span class="text-slate-500">Type</span><span class="font-medium"><?= e(Trip::TYPES[$trip['trip_type']] ?? $trip['trip_type']) ?></span></div>
+            <div class="flex justify-between"><span class="text-slate-500">Priorité</span><span class="font-medium"><?= e(Trip::PRIORITIES[$trip['priority']] ?? $trip['priority']) ?></span></div>
+            <div class="flex justify-between"><span class="text-slate-500">Visible site public</span><span class="font-medium"><?= $trip['public_visible'] ? '✓' : '×' ?></span></div>
+          </div>
+        </div>
+        <div>
+          <h3 class="font-semibold text-slate-700 mb-3">Kilométrage / conditions</h3>
+          <div class="space-y-2 text-sm">
+            <div class="flex justify-between"><span class="text-slate-500">Km départ</span><span class="font-medium mono"><?= $trip['mileage_start'] ? number_format((int)$trip['mileage_start'], 0, ',', ' ') . ' km' : '—' ?></span></div>
+            <div class="flex justify-between"><span class="text-slate-500">Km arrivée</span><span class="font-medium mono"><?= $trip['mileage_end'] ? number_format((int)$trip['mileage_end'], 0, ',', ' ') . ' km' : '—' ?></span></div>
+            <div class="flex justify-between"><span class="text-slate-500">Carburant consommé</span><span class="font-medium mono"><?= $trip['fuel_consumed_liters'] ? number_format((float)$trip['fuel_consumed_liters'], 1, ',', '') . ' L' : '—' ?></span></div>
+            <div class="flex justify-between"><span class="text-slate-500">Météo</span><span class="font-medium"><?= e($trip['weather_conditions'] ?? '—') ?> <?= $trip['weather_temp_celsius'] !== null ? '· '.(int)$trip['weather_temp_celsius'].'°C' : '' ?></span></div>
+            <div class="flex justify-between"><span class="text-slate-500">Péages</span><span class="font-medium"><?= $trip['toll_amount_fcfa'] ? e(fcfa((int)$trip['toll_amount_fcfa'])) : '—' ?></span></div>
+            <div class="flex justify-between"><span class="text-slate-500">Agence origine</span><span class="font-medium"><?= e($trip['agency_origin'] ?? '—') ?></span></div>
+            <div class="flex justify-between"><span class="text-slate-500">Agence destination</span><span class="font-medium"><?= e($trip['agency_destination'] ?? '—') ?></span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Plan de sièges -->
+      <?php if ($totalSeats > 0): ?>
+        <div class="mt-8">
+          <h3 class="font-semibold text-slate-700 mb-3 flex items-center gap-2">
+            <i data-lucide="armchair" class="w-4 h-4 text-cb-primary"></i> Plan des sièges
+            <span class="text-xs text-slate-400 ml-2"><?= $soldCount ?> / <?= $totalSeats ?> occupés</span>
+          </h3>
+          <div class="grid grid-cols-8 sm:grid-cols-12 lg:grid-cols-15 gap-1.5 max-w-3xl">
+            <?php for ($i = 1; $i <= $totalSeats; $i++): $isBooked = isset($booked[$i]); ?>
+              <div class="aspect-square rounded-md flex items-center justify-center text-[10px] font-mono font-bold border <?= $isBooked
+                ? 'bg-cb-primary text-white border-cb-primary'
+                : 'bg-slate-50 text-slate-500 border-slate-200' ?>">
+                <?= $i ?>
+              </div>
+            <?php endfor ?>
+          </div>
+        </div>
+      <?php endif ?>
+
+      <!-- Équipage -->
+      <?php if ($crew): ?>
+        <div class="mt-8">
+          <h3 class="font-semibold text-slate-700 mb-3 flex items-center gap-2">
+            <i data-lucide="users" class="w-4 h-4 text-cb-primary"></i> Équipage
+          </h3>
+          <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            <?php foreach ($crew as $c): ?>
+              <div class="flex items-center gap-3 p-3 rounded-xl bg-slate-50 border border-slate-100">
+                <div class="w-10 h-10 rounded-full bg-cb-primary/10 flex items-center justify-center text-cb-primary font-bold text-sm">
+                  <?= e(strtoupper(mb_substr($c['first_name'] ?? '?', 0, 1) . mb_substr($c['last_name'] ?? '', 0, 1))) ?>
+                </div>
+                <div class="min-w-0">
+                  <div class="font-semibold text-slate-700 text-sm truncate"><?= e(($c['first_name']??'').' '.($c['last_name']??'')) ?></div>
+                  <div class="text-xs text-slate-500"><?= e($c['role']) ?> · <?= e($c['matricule'] ?? '') ?></div>
+                  <?php if (!empty($c['phone'])): ?><div class="text-xs text-slate-400 mono"><?= e($c['phone']) ?></div><?php endif ?>
+                </div>
+              </div>
+            <?php endforeach ?>
+          </div>
+        </div>
+      <?php endif ?>
+
+      <!-- Arrêts -->
+      <?php if ($lineStops): ?>
+        <div class="mt-8">
+          <h3 class="font-semibold text-slate-700 mb-3 flex items-center gap-2">
+            <i data-lucide="map" class="w-4 h-4 text-cb-primary"></i> Arrêts de la ligne
+          </h3>
+          <div class="space-y-2">
+            <?php foreach ($lineStops as $i => $stop): ?>
+              <div class="flex items-center gap-3 p-3 rounded-xl bg-slate-50">
+                <div class="w-8 h-8 rounded-full bg-white border-2 border-cb-primary flex items-center justify-center text-cb-primary font-bold text-sm shrink-0">
+                  <?= ($i + 1) ?>
+                </div>
+                <div class="flex-1">
+                  <div class="font-semibold text-slate-700 text-sm"><?= e($stop['name']) ?></div>
+                  <div class="text-xs text-slate-500">Position <?= (int)$stop['order_position'] ?> · <?= number_format((float)$stop['km_from_origin'], 1, ',', '') ?> km</div>
+                </div>
+              </div>
+            <?php endforeach ?>
+          </div>
+        </div>
+      <?php endif ?>
+    </div>
+
+    <!-- ── TAB PASSAGERS ── -->
+    <div x-show="tab==='passengers'" class="p-6">
+      <?php if ($passengerTickets): ?>
+        <table class="cockpit-table w-full">
+          <thead>
+            <tr><th>N° ticket</th><th>Siège</th><th>Passager</th><th>Téléphone</th><th>Embarq.</th><th>Descente</th><th class="text-right">Prix</th><th>Statut</th></tr>
+          </thead>
+          <tbody>
+            <?php foreach ($passengerTickets as $tk): ?>
+              <tr>
+                <td class="mono"><a href="<?= e(url('billetterie/'.$tk['id'])) ?>" class="text-cb-primary hover:underline"><?= e($tk['ticket_number']) ?></a></td>
+                <td class="mono font-bold"><?= e($tk['seat_number'] ?? '—') ?></td>
+                <td><?= e($tk['passenger_name'] ?? '—') ?></td>
+                <td class="mono text-faint"><?= e($tk['passenger_phone'] ?? '') ?></td>
+                <td><?= e($tk['boarding_name'] ?? '—') ?></td>
+                <td><?= e($tk['alighting_name'] ?? '—') ?></td>
+                <td class="num text-right"><?= e(fcfa((int)$tk['price_fcfa'])) ?></td>
+                <td><span class="cockpit-status <?= match($tk['status'] ?? '') {'emis'=>'amber','controle','utilise'=>'green','annule'=>'red',default=>'slate'} ?>"><?= e($tk['status'] ?? '') ?></span></td>
+              </tr>
+            <?php endforeach ?>
+          </tbody>
+        </table>
+      <?php else: ?>
+        <p class="text-slate-400 text-sm text-center py-8">Aucun passager pour ce voyage.</p>
+      <?php endif ?>
+    </div>
+
+    <!-- ── TAB CARGO ── -->
+    <div x-show="tab==='cargo'" class="p-6">
+      <?php if (!empty($parcels)): ?>
+        <table class="cockpit-table w-full">
+          <thead><tr><th>N°</th><th>Trajet</th><th>Expéditeur / Destinataire</th><th class="text-right">Poids</th><th class="text-right">Prix</th><th>Statut</th></tr></thead>
+          <tbody>
+            <?php foreach ($parcels as $p): ?>
+              <tr>
+                <td class="mono"><a href="<?= e(url('cargo/parcels/'.$p['id'])) ?>" class="text-cb-primary hover:underline"><?= e($p['parcel_number']) ?></a></td>
+                <td><?= e($p['origin_agency']) ?> → <?= e($p['destination_agency']) ?></td>
+                <td><?= e($p['sender_name']) ?> → <?= e($p['recipient_name']) ?></td>
+                <td class="num text-right"><?= number_format((float)$p['weight_kg'], 1, ',', '') ?> kg</td>
+                <td class="num text-right"><?= e(fcfa((int)$p['total_price_fcfa'])) ?></td>
+                <td><span class="cockpit-status <?= match($p['status']) {'depose','en_transit'=>'amber','arrive','retire'=>'green','perdu','endommage'=>'red',default=>'slate'} ?>"><?= e($p['status']) ?></span></td>
+              </tr>
+            <?php endforeach ?>
+          </tbody>
+        </table>
+        <a href="<?= e(url('cargo/manifest/'.$trip['id'])) ?>" class="text-xs text-cb-primary hover:underline mt-3 inline-block">Voir manifeste cargo →</a>
+      <?php else: ?>
+        <p class="text-slate-400 text-sm text-center py-8">Aucun colis sur ce voyage.</p>
+      <?php endif ?>
+    </div>
+
+    <!-- ── TAB RESERVATIONS ── -->
+    <div x-show="tab==='reservations'" class="p-6">
+      <?php if (!empty($reservations)): ?>
+        <table class="cockpit-table w-full">
+          <thead><tr><th>PNR</th><th>Contact</th><th class="text-center">Pax</th><th class="text-right">Total</th><th>Statut</th><th>Hold expire</th></tr></thead>
+          <tbody>
+            <?php foreach ($reservations as $r): ?>
+              <tr>
+                <td class="mono"><a href="<?= e(url('billetterie/reservations/'.$r['pnr_code'])) ?>" class="text-cb-primary hover:underline"><?= e($r['pnr_code']) ?></a></td>
+                <td><?= e($r['contact_name']) ?> · <span class="text-faint"><?= e($r['contact_phone']) ?></span></td>
+                <td class="text-center"><?= (int)$r['items_count'] ?></td>
+                <td class="num text-right"><?= e(fcfa((int)$r['total_amount_fcfa'])) ?></td>
+                <td><span class="cockpit-status slate"><?= e($r['status']) ?></span></td>
+                <td class="text-xs"><?= $r['hold_expires_at'] ? e(date('d/m H:i', strtotime((string)$r['hold_expires_at']))) : '—' ?></td>
+              </tr>
+            <?php endforeach ?>
+          </tbody>
+        </table>
+      <?php else: ?>
+        <p class="text-slate-400 text-sm text-center py-8">Aucune réservation.</p>
+      <?php endif ?>
+    </div>
+
+    <!-- ── TAB WAITLIST ── -->
+    <div x-show="tab==='waitlist'" class="p-6">
+      <?php if (!empty($waitlist)): ?>
+        <table class="cockpit-table w-full">
+          <thead><tr><th>Pos.</th><th>Passager</th><th>Téléphone</th><th class="text-right">Sièges</th><th>Statut</th><th>Inscrit</th></tr></thead>
+          <tbody>
+            <?php foreach ($waitlist as $w): ?>
+              <tr>
+                <td class="font-bold"><?= (int)$w['position'] ?></td>
+                <td><?= e($w['passenger_name']) ?></td>
+                <td class="mono text-faint"><?= e($w['passenger_phone']) ?></td>
+                <td class="num text-right"><?= (int)$w['seats_requested'] ?></td>
+                <td><span class="cockpit-status slate"><?= e($w['status']) ?></span></td>
+                <td class="text-xs"><?= e(date('d/m H:i', strtotime((string)$w['requested_at']))) ?></td>
+              </tr>
+            <?php endforeach ?>
+          </tbody>
+        </table>
+        <a href="<?= e(url('billetterie/waitlist/'.$trip['id'])) ?>" class="text-xs text-cb-primary hover:underline mt-3 inline-block">Gérer la liste d'attente →</a>
+      <?php else: ?>
+        <p class="text-slate-400 text-sm text-center py-8">Personne en liste d'attente.</p>
+      <?php endif ?>
+    </div>
+
+    <!-- ── TAB INSPECTION ── -->
+    <div x-show="tab==='inspection'" class="p-6">
+      <?php if ($inspection): ?>
+        <div class="flex items-center gap-3 mb-4">
+          <span class="px-3 py-1 rounded-full text-sm font-bold <?= $inspection['overall_status']==='pass' ? 'bg-emerald-100 text-emerald-700' : ($inspection['overall_status']==='pass_with_remarks' ? 'bg-amber-100 text-amber-700' : 'bg-rose-100 text-rose-700') ?>">
+            <?= e($inspection['overall_status']) ?>
+          </span>
+          <span class="text-xs text-slate-500">Inspecté le <?= e(date('d/m/Y H:i', strtotime((string)$inspection['inspected_at']))) ?></span>
+        </div>
+        <div class="grid grid-cols-2 md:grid-cols-3 gap-2 text-sm">
+          <?php foreach (\CityBus\Services\InspectionService::FIELDS as $f => $lbl): ?>
+            <div class="flex items-center gap-2 p-2 rounded-lg <?= !empty($inspection[$f]) ? 'bg-emerald-50' : 'bg-rose-50' ?>">
+              <i data-lucide="<?= !empty($inspection[$f]) ? 'check-circle' : 'x-circle' ?>" class="w-4 h-4 <?= !empty($inspection[$f]) ? 'text-emerald-600' : 'text-rose-600' ?>"></i>
+              <span><?= e($lbl) ?></span>
+            </div>
+          <?php endforeach ?>
+        </div>
+        <?php if (!empty($inspection['remarks'])): ?>
+          <div class="mt-4 p-3 rounded-xl bg-amber-50 border border-amber-200 text-sm">
+            <strong>Remarques :</strong> <?= e($inspection['remarks']) ?>
+          </div>
+        <?php endif ?>
+      <?php else: ?>
+        <div class="text-center py-8">
+          <p class="text-slate-400 text-sm">Aucune pré-vérification enregistrée.</p>
+          <?php if (can('inspection.create')): ?>
+            <a href="<?= e(url('flotte/inspections/'.$trip['id'])) ?>"
+               class="mt-4 inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-cb-bg text-cb-primary text-sm font-semibold hover:bg-cb-primary hover:text-white">
+              <i data-lucide="clipboard-check" class="w-4 h-4"></i> Effectuer la pré-vérification
+            </a>
+          <?php endif ?>
+        </div>
+      <?php endif ?>
+    </div>
+
+    <!-- ── TAB P&L ── -->
+    <div x-show="tab==='pnl'" class="p-6">
+      <?php if ($pnl): ?>
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+          <div class="cockpit-kpi green"><div class="cockpit-kpi-label">Recettes</div><div class="cockpit-kpi-value"><?= e(fcfa((int)$pnl['revenue_total'])) ?></div></div>
+          <div class="cockpit-kpi amber"><div class="cockpit-kpi-label">Coûts directs</div><div class="cockpit-kpi-value"><?= e(fcfa((int)$pnl['cost_direct_total'])) ?></div></div>
+          <div class="cockpit-kpi"><div class="cockpit-kpi-label">Coûts indirects</div><div class="cockpit-kpi-value"><?= e(fcfa((int)$pnl['cost_indirect_total'])) ?></div></div>
+          <div class="cockpit-kpi <?= (int)$pnl['margin_net'] >= 0 ? 'green' : 'danger' ?>"><div class="cockpit-kpi-label">Marge nette</div><div class="cockpit-kpi-value"><?= e(fcfa((int)$pnl['margin_net'])) ?></div></div>
+        </div>
+        <a href="<?= e(url('finance/pnl/trip/'.$trip['id'])) ?>" class="text-xs text-cb-primary hover:underline">Détail P&L →</a>
+      <?php else: ?>
+        <p class="text-slate-400 text-sm text-center py-8">P&L disponible uniquement pour les voyages clôturés.</p>
+      <?php endif ?>
+    </div>
+
+    <!-- ── TAB DOCUMENTS ── -->
+    <div x-show="tab==='documents'" class="p-6">
+      <?php if (can('voyages.documents.upload')): ?>
+        <form method="post" action="<?= e(url('voyages/'.$trip['id'].'/documents')) ?>" enctype="multipart/form-data" class="mb-5 p-4 bg-slate-50 rounded-xl flex gap-3 items-end flex-wrap">
+          <?= csrf_field() ?>
+          <div>
+            <label class="cb-label">Type</label>
+            <select name="doc_type" class="cb-input">
+              <option value="bordereau_route">Bordereau de route</option>
+              <option value="autorisation">Autorisation</option>
+              <option value="photo">Photo</option>
+              <option value="rapport_incident">Rapport incident</option>
+              <option value="autre">Autre</option>
+            </select>
+          </div>
+          <div class="flex-1 min-w-[200px]">
+            <label class="cb-label">Titre</label>
+            <input name="title" required class="cb-input w-full">
+          </div>
+          <div>
+            <label class="cb-label">Fichier</label>
+            <input type="file" name="document" required class="text-sm">
+          </div>
+          <button class="px-4 py-2.5 rounded-xl bg-cb-primary text-white font-semibold text-sm">Uploader</button>
+        </form>
+      <?php endif ?>
+      <?php if (!empty($documents)): ?>
+        <div class="space-y-2">
+          <?php foreach ($documents as $d): ?>
+            <div class="flex items-center gap-3 p-3 bg-white border border-slate-100 rounded-xl">
+              <i data-lucide="file" class="w-5 h-5 text-slate-400 shrink-0"></i>
+              <div class="flex-1 min-w-0">
+                <div class="font-semibold text-sm text-slate-700 truncate"><?= e($d['title']) ?></div>
+                <div class="text-xs text-slate-500"><?= e($d['doc_type']) ?> · <?= e(date('d/m/Y H:i', strtotime((string)$d['uploaded_at']))) ?> · <?= e($d['uploaded_by_name'] ?? '?') ?></div>
+              </div>
+              <a href="<?= e(url('storage/' . $d['file_path'])) ?>" target="_blank" class="text-xs text-cb-primary hover:underline">Télécharger</a>
+            </div>
+          <?php endforeach ?>
+        </div>
+      <?php else: ?>
+        <p class="text-slate-400 text-sm text-center py-8">Aucun document.</p>
+      <?php endif ?>
+    </div>
+
+    <!-- ── TAB COSTS ── -->
+    <div x-show="tab==='costs'" class="p-6">
+      <?php if (can('voyages.costs.manage')): ?>
+        <form method="post" action="<?= e(url('voyages/'.$trip['id'].'/costs')) ?>" class="mb-5 p-4 bg-slate-50 rounded-xl flex gap-3 items-end flex-wrap">
+          <?= csrf_field() ?>
+          <div>
+            <label class="cb-label">Type</label>
+            <select name="cost_type" required class="cb-input">
+              <option value="peage">Péage</option>
+              <option value="carburant">Carburant</option>
+              <option value="parking">Parking</option>
+              <option value="prime_chauffeur">Prime chauffeur</option>
+              <option value="prime_convoyeur">Prime convoyeur</option>
+              <option value="reparation">Réparation</option>
+              <option value="amende">Amende</option>
+              <option value="divers">Divers</option>
+            </select>
+          </div>
+          <div>
+            <label class="cb-label">Montant FCFA</label>
+            <input type="number" name="amount_fcfa" required class="cb-input">
+          </div>
+          <div class="flex-1 min-w-[200px]">
+            <label class="cb-label">Description</label>
+            <input name="description" class="cb-input w-full">
+          </div>
+          <button class="px-4 py-2.5 rounded-xl bg-cb-primary text-white font-semibold text-sm">Ajouter</button>
+        </form>
+      <?php endif ?>
+      <?php if (!empty($costs)): ?>
+        <table class="cockpit-table w-full">
+          <thead><tr><th>Date</th><th>Type</th><th>Description</th><th class="text-right">Montant</th></tr></thead>
+          <tbody>
+            <?php $total = 0; foreach ($costs as $c): $total += (int)$c['amount_fcfa']; ?>
+              <tr>
+                <td class="text-xs"><?= e(date('d/m/Y', strtotime((string)$c['created_at']))) ?></td>
+                <td><?= e($c['cost_type']) ?></td>
+                <td><?= e($c['description'] ?? '—') ?></td>
+                <td class="num text-right"><?= e(fcfa((int)$c['amount_fcfa'])) ?></td>
+              </tr>
+            <?php endforeach ?>
+            <tr><td colspan="3" class="text-right font-bold">Total</td><td class="num text-right font-bold text-amber-600"><?= e(fcfa($total)) ?></td></tr>
+          </tbody>
+        </table>
+      <?php else: ?>
+        <p class="text-slate-400 text-sm text-center py-8">Aucun coût enregistré.</p>
+      <?php endif ?>
+    </div>
+
+    <!-- ── TAB DISPUTES ── -->
+    <div x-show="tab==='disputes'" class="p-6">
+      <?php if (can('voyages.dispute.manage')): ?>
+        <details class="mb-5">
+          <summary class="px-4 py-2.5 bg-slate-50 rounded-xl cursor-pointer text-sm font-semibold text-slate-700">+ Ouvrir un litige</summary>
+          <form method="post" action="<?= e(url('voyages/'.$trip['id'].'/disputes')) ?>" class="mt-3 p-4 bg-slate-50 rounded-xl space-y-3">
+            <?= csrf_field() ?>
+            <div class="grid grid-cols-2 gap-3">
+              <select name="type" required class="cb-input">
+                <option value="retard">Retard</option>
+                <option value="perte_bagage">Perte bagage</option>
+                <option value="blessure">Blessure</option>
+                <option value="remboursement">Remboursement</option>
+                <option value="reclamation_qualite">Qualité service</option>
+                <option value="autre">Autre</option>
+              </select>
+              <input type="number" name="claim_amount_fcfa" placeholder="Montant réclamé (FCFA)" class="cb-input">
+            </div>
+            <input name="title" required placeholder="Titre du litige" class="cb-input w-full">
+            <textarea name="description" required rows="3" placeholder="Description détaillée" class="cb-input w-full"></textarea>
+            <button class="px-4 py-2.5 rounded-xl bg-rose-600 text-white font-semibold text-sm">Ouvrir le litige</button>
+          </form>
+        </details>
+      <?php endif ?>
+      <?php if (!empty($disputes)): ?>
+        <div class="space-y-3">
+          <?php foreach ($disputes as $d): ?>
+            <div class="p-4 bg-white border border-slate-100 rounded-xl">
+              <div class="flex items-start justify-between gap-2">
+                <div>
+                  <div class="font-semibold text-slate-700"><?= e($d['title']) ?></div>
+                  <div class="text-xs text-slate-500"><?= e($d['type']) ?> · ouvert le <?= e(date('d/m/Y', strtotime((string)$d['opened_at']))) ?></div>
+                </div>
+                <span class="cockpit-status <?= match($d['status']) {'ouvert','en_cours'=>'amber','resolu'=>'green','rejete','escalade'=>'red',default=>'slate'} ?>"><?= e($d['status']) ?></span>
+              </div>
+              <p class="text-sm text-slate-600 mt-2"><?= e($d['description']) ?></p>
+              <?php if ($d['claim_amount_fcfa']): ?>
+                <p class="text-xs mt-2 font-semibold text-rose-600">Montant réclamé : <?= e(fcfa((int)$d['claim_amount_fcfa'])) ?></p>
+              <?php endif ?>
+            </div>
+          <?php endforeach ?>
+        </div>
+      <?php else: ?>
+        <p class="text-slate-400 text-sm text-center py-8">Aucun litige.</p>
+      <?php endif ?>
+    </div>
+
+    <!-- ── TAB MESSAGES ── -->
+    <div x-show="tab==='messages'" class="p-6">
+      <?php if (!empty($messages)): ?>
+        <div class="space-y-2">
+          <?php foreach ($messages as $m): ?>
+            <div class="flex gap-3 p-3 bg-white border border-slate-100 rounded-xl">
+              <div class="w-8 h-8 rounded-full bg-cb-bg flex items-center justify-center shrink-0">
+                <i data-lucide="message-circle" class="w-4 h-4 text-cb-primary"></i>
+              </div>
+              <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-2 text-xs text-slate-500">
+                  <span class="font-bold uppercase"><?= e($m['channel']) ?></span>
+                  <span>·</span>
+                  <span><?= e($m['audience']) ?></span>
+                  <span>·</span>
+                  <span><?= e(date('d/m/Y H:i', strtotime((string)$m['sent_at']))) ?></span>
+                  <?php if ($m['sender_name']): ?><span>·</span><span><?= e($m['sender_name']) ?></span><?php endif ?>
+                </div>
+                <div class="text-sm mt-1"><?= e($m['body']) ?></div>
+                <div class="text-xs text-slate-400 mt-1"><?= (int)$m['success_count'] ?> envoyés / <?= (int)$m['recipients_count'] ?> destinataires</div>
+              </div>
+            </div>
+          <?php endforeach ?>
+        </div>
+      <?php else: ?>
+        <p class="text-slate-400 text-sm text-center py-8">Aucun message envoyé.</p>
+      <?php endif ?>
+    </div>
+
+    <!-- ── TAB AUDIT (timeline) ── -->
+    <div x-show="tab==='audit'" class="p-6">
+      <?php if (!empty($statusTimeline)): ?>
+        <div class="relative pl-8">
+          <div class="absolute left-3 top-0 bottom-0 w-0.5 bg-slate-200"></div>
+          <?php foreach ($statusTimeline as $s):
+            $sm2 = $statusMeta[$s['to_status']] ?? null;
+          ?>
+            <div class="relative pb-6">
+              <div class="absolute -left-5 w-3 h-3 rounded-full <?= $sm2 ? $sm2['dot'] : 'bg-slate-400' ?> border-2 border-white"></div>
+              <div class="bg-white border border-slate-100 rounded-xl p-3">
+                <div class="flex items-center gap-2 text-sm">
+                  <span class="font-semibold"><?= $sm2 ? e($sm2['label']) : e($s['to_status']) ?></span>
+                  <?php if ($s['from_status']): ?>
+                    <span class="text-xs text-slate-400">depuis <?= e(Trip::STATUSES[$s['from_status']] ?? $s['from_status']) ?></span>
+                  <?php endif ?>
+                </div>
+                <?php if (!empty($s['reason'])): ?><p class="text-sm text-slate-600 mt-1"><?= e($s['reason']) ?></p><?php endif ?>
+                <p class="text-xs text-slate-400 mt-1">
+                  <?= e(date('d/m/Y H:i:s', strtotime((string)$s['changed_at']))) ?>
+                  <?php if (!empty($s['author'])): ?>· par <?= e(trim((string)$s['author'])) ?><?php endif ?>
+                </p>
+              </div>
+            </div>
+          <?php endforeach ?>
+        </div>
+      <?php else: ?>
+        <p class="text-slate-400 text-sm text-center py-8">Aucun événement.</p>
+      <?php endif ?>
+    </div>
+
+  </div><!-- fin onglets -->
+
+  <!-- ════ MODALES ════ -->
+
+  <!-- Changer statut -->
+  <div x-data="{ open: false }" @open-modal.window="if($event.detail==='status') open = true" x-show="open" x-cloak
+       class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" @click.self="open = false">
+    <form method="post" action="<?= e(url('voyages/'.$trip['id'].'/status')) ?>" class="bg-white rounded-2xl p-6 max-w-md w-full" @click.stop>
+      <?= csrf_field() ?>
+      <h3 class="font-bold text-lg mb-4">Changer le statut</h3>
+      <select name="status" required class="cb-input w-full mb-3">
+        <?php foreach (Trip::STATUSES as $k => $lbl): ?>
+          <option value="<?= e($k) ?>" <?= $trip['status']===$k?'selected':'' ?>><?= e($lbl) ?></option>
+        <?php endforeach ?>
+      </select>
+      <textarea name="reason" rows="3" placeholder="Motif (obligatoire pour incident, annulation, retour, litige)" class="cb-input w-full"></textarea>
+      <div class="flex justify-end gap-2 mt-4">
+        <button type="button" @click="open=false" class="px-4 py-2 rounded-xl border border-slate-200">Annuler</button>
+        <button class="px-4 py-2 rounded-xl bg-cb-primary text-white">Confirmer</button>
+      </div>
+    </form>
+  </div>
+
+  <!-- Communiquer aux passagers -->
+  <div x-data="{ open: false }" @open-modal.window="if($event.detail==='communicate') open = true" x-show="open" x-cloak
+       class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" @click.self="open = false">
+    <form method="post" action="<?= e(url('voyages/'.$trip['id'].'/communicate')) ?>" class="bg-white rounded-2xl p-6 max-w-md w-full" @click.stop>
+      <?= csrf_field() ?>
+      <h3 class="font-bold text-lg mb-4">Envoyer un SMS aux passagers</h3>
+      <select name="audience" class="cb-input w-full mb-3">
+        <option value="all_passengers">Tous les passagers</option>
+        <option value="crew">Équipage uniquement</option>
+      </select>
+      <textarea name="message" rows="4" required maxlength="320" placeholder="Votre message (max 320 car.)" class="cb-input w-full"></textarea>
+      <p class="text-xs text-slate-400 mt-2">Sera envoyé à tous les passagers actifs ayant un téléphone enregistré.</p>
+      <div class="flex justify-end gap-2 mt-4">
+        <button type="button" @click="open=false" class="px-4 py-2 rounded-xl border border-slate-200">Annuler</button>
+        <button class="px-4 py-2 rounded-xl bg-cb-primary text-white">Envoyer</button>
+      </div>
+    </form>
+  </div>
+
+  <!-- Remplacer bus -->
+  <?php if (can('voyages.replace_bus')): ?>
+  <div x-data="{ open: false }" @open-modal.window="if($event.detail==='replace-bus') open = true" x-show="open" x-cloak
+       class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" @click.self="open = false">
+    <form method="post" action="<?= e(url('voyages/'.$trip['id'].'/replace-bus')) ?>" class="bg-white rounded-2xl p-6 max-w-md w-full" @click.stop>
+      <?= csrf_field() ?>
+      <h3 class="font-bold text-lg mb-4">Remplacer le bus</h3>
+      <p class="text-xs text-slate-500 mb-3">Bus actuel : <strong><?= e($trip['bus_code']) ?></strong></p>
+      <input type="number" name="new_bus_id" required placeholder="ID du nouveau bus" class="cb-input w-full mb-3">
+      <textarea name="reason" rows="3" required minlength="5" placeholder="Motif (5 car. min)" class="cb-input w-full"></textarea>
+      <div class="flex justify-end gap-2 mt-4">
+        <button type="button" @click="open=false" class="px-4 py-2 rounded-xl border border-slate-200">Annuler</button>
+        <button class="px-4 py-2 rounded-xl bg-cb-primary text-white">Confirmer</button>
+      </div>
+    </form>
+  </div>
+  <?php endif ?>
+
+  <!-- Remplacer chauffeur -->
+  <?php if (can('voyages.replace_driver')): ?>
+  <div x-data="{ open: false }" @open-modal.window="if($event.detail==='replace-driver') open = true" x-show="open" x-cloak
+       class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" @click.self="open = false">
+    <form method="post" action="<?= e(url('voyages/'.$trip['id'].'/replace-driver')) ?>" class="bg-white rounded-2xl p-6 max-w-md w-full" @click.stop>
+      <?= csrf_field() ?>
+      <h3 class="font-bold text-lg mb-4">Remplacer le chauffeur</h3>
+      <input type="number" name="new_driver_id" required placeholder="ID du nouveau chauffeur" class="cb-input w-full mb-3">
+      <textarea name="reason" rows="3" required minlength="5" placeholder="Motif (5 car. min)" class="cb-input w-full"></textarea>
+      <div class="flex justify-end gap-2 mt-4">
+        <button type="button" @click="open=false" class="px-4 py-2 rounded-xl border border-slate-200">Annuler</button>
+        <button class="px-4 py-2 rounded-xl bg-cb-primary text-white">Confirmer</button>
+      </div>
+    </form>
+  </div>
+  <?php endif ?>
+
+  <!-- Déverrouiller manifeste -->
+  <?php if (can('voyages.unlock_manifest')): ?>
+  <div x-data="{ open: false }" @open-modal.window="if($event.detail==='unlock') open = true" x-show="open" x-cloak
+       class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" @click.self="open = false">
+    <form method="post" action="<?= e(url('voyages/'.$trip['id'].'/unlock')) ?>" class="bg-white rounded-2xl p-6 max-w-md w-full" @click.stop>
+      <?= csrf_field() ?>
+      <h3 class="font-bold text-lg mb-4">Déverrouiller le manifeste</h3>
+      <p class="text-xs text-slate-500 mb-3">Cette action permettra à nouveau la vente de tickets pour ce voyage.</p>
+      <textarea name="reason" rows="3" required minlength="5" placeholder="Motif (5 car. min)" class="cb-input w-full"></textarea>
+      <div class="flex justify-end gap-2 mt-4">
+        <button type="button" @click="open=false" class="px-4 py-2 rounded-xl border border-slate-200">Annuler</button>
+        <button class="px-4 py-2 rounded-xl bg-amber-600 text-white">Déverrouiller</button>
+      </div>
+    </form>
+  </div>
+  <?php endif ?>
+
+  <!-- Voyage de remplacement -->
+  <?php if (can('voyages.create')): ?>
+  <div x-data="{ open: false }" @open-modal.window="if($event.detail==='replacement') open = true" x-show="open" x-cloak
+       class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" @click.self="open = false">
+    <form method="post" action="<?= e(url('voyages/'.$trip['id'].'/replacement')) ?>" class="bg-white rounded-2xl p-6 max-w-md w-full" @click.stop>
+      <?= csrf_field() ?>
+      <h3 class="font-bold text-lg mb-4">Créer un voyage de remplacement</h3>
+      <p class="text-xs text-slate-500 mb-3">Clone ce voyage en gardant la ligne. Les billets resteront sur le voyage parent.</p>
+      <div class="grid grid-cols-2 gap-3">
+        <div><label class="cb-label">Date</label><input type="date" name="trip_date" value="<?= date('Y-m-d') ?>" required class="cb-input"></div>
+        <div><label class="cb-label">Heure départ</label><input type="time" name="departure_scheduled" required class="cb-input"></div>
+      </div>
+      <div class="flex justify-end gap-2 mt-4">
+        <button type="button" @click="open=false" class="px-4 py-2 rounded-xl border border-slate-200">Annuler</button>
+        <button class="px-4 py-2 rounded-xl bg-cb-primary text-white">Créer</button>
+      </div>
+    </form>
+  </div>
+  <?php endif ?>
+
+</div>
+<?php $view->end() ?>
